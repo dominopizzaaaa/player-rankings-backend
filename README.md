@@ -1,50 +1,60 @@
 # Elo Ranking System (Python + FastAPI)
 
 ## Project Overview
-This project is an Elo ranking system built for XiaobaiQiu, a table tennis club in Singapore. The system is designed to entice players to compete in club tournaments by tracking their rankings dynamically. Elo scores are updated every 10 minutes based on match results, giving players a way to see their progress and stay engaged with the club's competitions.
+This project is an Elo ranking system built for **XiaobaiQiu**, a table tennis club in Singapore.  
+The system is designed to **entice players to compete in club tournaments** by tracking their rankings dynamically.  
+Elo scores are updated **every 10 minutes** based on match results, giving players a way to see their progress and stay engaged with the club's competitions.
 
 ## Why FastAPI?
-After evaluating different backend technologies (Python Flask vs. FastAPI vs. Node.js), we decided to use FastAPI because:
-- It's faster than Flask (built-in async support).
-- Handles 100 players updating at once efficiently.
+After evaluating different backend technologies (**Flask vs. FastAPI vs. Node.js**), we decided to use **FastAPI** because:
+- It's **faster** than Flask (**built-in async support**).
+- Handles **100 players updating at once efficiently**.
 - No need for additional dependencies like Celery or Redis.
-- Easier to deploy and maintain.
+- **Easier to deploy and maintain**.
 
 ## Tech Stack
 - **Backend:** FastAPI (Python 3)
-- **Database:** SQLite (or PostgreSQL for production)
+- **Database:** **PostgreSQL** (via SQLAlchemy ORM)
 - **Task Handling:** FastAPI Background Tasks
-- **Hosting:** (TBD – GoDaddy, AWS, or DigitalOcean)
+- **Hosting:** *(TBD – GoDaddy, AWS, or DigitalOcean)*
 
-- Database Setup (PostgreSQL + SQLAlchemy)
-🛠 Technologies Used
-| Technology  | Why It Was Used? |
-|------------|----------------|
-| PostgreSQL  | A relational database used to store player rankings persistently. Unlike in-memory dictionaries, PostgreSQL ensures that rankings are saved even if the server restarts. |
-| SQLAlchemy ORM | Simplifies interaction with PostgreSQL by allowing database queries using Python classes and objects instead of raw SQL. This increases security and maintainability. |
-| Alembic Migrations | Tracks database schema changes (e.g., creating tables) and applies them automatically. |
+---
 
-📌 Setting Up PostgreSQL
-1. Installed PostgreSQL using Homebrew:
-   ```bash
-   brew install postgresql
-   brew services start postgresql
-   ```
-2. Logged into PostgreSQL:
-   ```bash
-   psql -U postgres
-   ```
-3. Created the elo_ranking database:
-   ```sql
-   CREATE DATABASE elo_ranking OWNER postgres;
-   ```
-4. Verified database creation:
-   ```sql
-   \l  -- Lists all databases
-   ```
+# 📌 **Database Setup (PostgreSQL + SQLAlchemy)**
+This section documents the **database setup**, including technologies used, why they were chosen, and how they were implemented.
 
-📌 Connecting FastAPI to PostgreSQL
-### Installed Required Python Libraries
+## 🛠 **Technologies Used**
+| **Technology**  | **Why It Was Used?** |
+|---------------|----------------|
+| **PostgreSQL** | A relational database used to store **player rankings persistently**. Unlike in-memory dictionaries, PostgreSQL ensures that rankings **are saved even if the server restarts**. |
+| **SQLAlchemy ORM** | Simplifies interaction with PostgreSQL by allowing **database queries using Python classes and objects** instead of raw SQL. This increases **security and maintainability**. |
+| **Alembic Migrations** | Tracks **database schema changes** (e.g., creating tables) and applies them automatically. |
+
+---
+
+## 📌 **Setting Up PostgreSQL**
+### **1️⃣ Install PostgreSQL**
+```bash
+brew install postgresql
+brew services start postgresql
+```
+### **2️⃣ Log into PostgreSQL**
+```bash
+psql -U postgres
+```
+### **3️⃣ Create the `elo_ranking` Database**
+```sql
+CREATE DATABASE elo_ranking OWNER postgres;
+```
+### **4️⃣ Verify Database Creation**
+```sql
+\l  -- Lists all databases
+```
+
+---
+
+## 📌 **Connecting FastAPI to PostgreSQL**
+### **🔹 Install Required Python Libraries**
 ```bash
 pip install sqlalchemy psycopg2 alembic
 ```
@@ -52,8 +62,10 @@ pip install sqlalchemy psycopg2 alembic
 - **psycopg2** → PostgreSQL database driver.
 - **Alembic** → Handles schema migrations.
 
-📌 Database Connection Setup (database.py)
-Created a database connection in `database.py` using SQLAlchemy:
+---
+
+## 📌 **Database Connection Setup (`database.py`)**
+Created a **database connection** using **SQLAlchemy**:
 ```python
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -72,9 +84,10 @@ def get_db():
     finally:
         db.close()
 ```
+---
 
-📌 Creating the Players Table (models.py)
-Created the players table in `models.py`:
+## 📌 **Creating the Players Table (`models.py`)**
+Created the `players` table:
 ```python
 from sqlalchemy import Column, Integer, String
 from database import Base
@@ -87,31 +100,36 @@ class Player(Base):
     rating = Column(Integer, default=1500)
     matches = Column(Integer, default=0)
 ```
+---
 
-📌 Applying Database Migrations with Alembic
-1. Initialize Alembic:
+## 📌 **Applying Database Migrations with Alembic**
+Since PostgreSQL doesn’t **automatically detect Python models**, we used **Alembic** for schema migrations.
+
+### **1️⃣ Initialize Alembic**
 ```bash
 alembic init alembic
 ```
-2. Configure Alembic to use PostgreSQL in `alembic.ini`:
+### **2️⃣ Configure Alembic to use PostgreSQL in `alembic.ini`**
 ```ini
 sqlalchemy.url = postgresql://postgres:dominopizza@localhost/elo_ranking
 ```
-3. Generate migration file:
+### **3️⃣ Generate a Migration File**
 ```bash
 alembic revision --autogenerate -m "Create players table"
 ```
-4. Apply migration:
+### **4️⃣ Apply the Migration**
 ```bash
 alembic upgrade head
 ```
 
-📌 Updating FastAPI Endpoints to Use PostgreSQL
-### Before (In-Memory Dictionary)
+---
+
+## 📌 **Updating FastAPI Endpoints to Use PostgreSQL**
+### **Before (In-Memory Dictionary)**
 ```python
 player_ratings = {}
 ```
-### After (Using PostgreSQL)
+### **After (Using PostgreSQL)**
 Modified `/submit_match` endpoint:
 ```python
 from sqlalchemy.orm import Session
@@ -135,15 +153,22 @@ def submit_match(result: MatchResult, db: Session = Depends(get_db)):
 
     return {"message": "Match recorded successfully"}
 ```
+---
 
-📌 Summary of Database Setup
-| Step | What We Did | Why? |
-|------|------------|------|
-| Installed PostgreSQL | Set up a persistent database | Store rankings permanently |
-| Connected FastAPI | Used SQLAlchemy ORM | Easier, secure database management |
-| Created `players` Table | Defined `models.py` | Structure to store player Elo ratings |
-| Set Up Alembic | Managed database migrations | Track schema changes automatically |
-| Updated API | Used PostgreSQL for `/submit_match` & `/rankings` | Store & retrieve Elo data |
-| Tested API | Sent match results & checked rankings | Verified database integration |
+## 📌 **Summary of Database Setup**
+| **Step** | **What We Did** | **Why?** |
+|----------|----------------|----------|
+| **1️⃣ Installed PostgreSQL** | Set up a persistent database | Store rankings permanently |
+| **2️⃣ Connected FastAPI** | Used SQLAlchemy ORM | Easier, secure database management |
+| **3️⃣ Created `players` Table** | Defined `models.py` | Structure to store player Elo ratings |
+| **4️⃣ Set Up Alembic** | Managed database migrations | Track schema changes automatically |
+| **5️⃣ Updated API** | Used PostgreSQL for `/submit_match` & `/rankings` | Store & retrieve Elo data |
+| **6️⃣ Tested API** | Sent match results & checked rankings | Verified database integration |
 
-![image](https://github.com/user-attachments/assets/4fd8c7b9-46bb-45d7-9851-5b6dee4a7514)
+---
+
+## 🚀 **Next Steps**
+Now that the **database is fully integrated**, we can:
+1. **Deploy the API Online** (so others can access it).
+2. **Build a Frontend Leaderboard** (display rankings on a website).
+3. **Optimize Queries** (for better performance).
