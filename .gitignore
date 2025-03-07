@@ -1,4 +1,19 @@
+# Ignore Python virtual environment
 venv/
+.env
+
+# Ignore compiled Python files
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Ignore database migrations
+alembic/versions/
+
+# Ignore PostgreSQL data (if using a local database dump)
+*.dump
+*.sql
+
+# Ignore macOS system files
 .DS_Store
