@@ -1,9 +1,10 @@
+import os
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # PostgreSQL Connection URL (replace with your actual password)
-DATABASE_URL = "postgresql://postgres:dominopizza@localhost/elo_ranking"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Create the SQLAlchemy engine
 engine = create_engine(DATABASE_URL)
