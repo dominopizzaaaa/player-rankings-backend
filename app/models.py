@@ -24,4 +24,5 @@ class Match(Base):
     player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     player1_score = Column(Integer, nullable=False)
     player2_score = Column(Integer, nullable=False)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())  # Auto timestamp
+    winner = Column(Integer, ForeignKey("players.id"), nullable=False)  # ✅ Add winner
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())

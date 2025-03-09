@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from . import models, schemas, database
+from .models import Match, Player
+from .schemas import MatchCreate, MatchResponse
 from .database import engine, SessionLocal
 from .elo import calculate_elo
 
@@ -67,28 +69,40 @@ def delete_player(player_id: int, db: Session = Depends(get_db)):
 
 # Submit match results and update Elo ratings
 @app.post("/matches/", response_model=schemas.MatchResponse)
-def submit_match(match: schemas.MatchCreate, db: Session = Depends(get_db)):
-    player1 = db.query(models.Player).filter(models.Player.id == match.player1_id).first()
-    player2 = db.query(models.Player).filter(models.Player.id == match.player2_id).first()
+def submit_match(match: MatchCreate, db: Session = Depends(get_db)):
+    player1 = db.query(Player).filter(Player.id == match.player1_id).first()
+    player2 = db.query(Player).filter(Player.id == match.player2_id).first()
 
     if not player1 or not player2:
         raise HTTPException(status_code=404, detail="One or both players not found")
 
-    if match.player1_score > match.player2_score:
-        winner, loser = player1, player2
-    elif match.player2_score > match.player1_score:
-        winner, loser = player2, player1
-    else:
-        raise HTTPException(status_code=400, detail="Match cannot be a tie")
+    # Ensure winner ID is correct
+    if match.winner not in [match.player1_id, match.player2_id]:
+        raise HTTPException(status_code=400, detail="Winner must be one of the two players")
 
+    # Determine winner & loser
+    if match.winner == match.player1_id:
+        winner, loser = player1, player2
+    else:
+        winner, loser = player2, player1
+
+    # Calculate new Elo ratings
     new_winner_elo, new_loser_elo = calculate_elo(winner.rating, loser.rating)
 
+    # Update player ratings
     winner.rating = new_winner_elo
     loser.rating = new_loser_elo
     winner.matches_played += 1
     loser.matches_played += 1
 
-    db_match = models.Match(**match.dict())
+    # Save match result
+    db_match = Match(
+        player1_id=match.player1_id,
+        player2_id=match.player2_id,
+        player1_score=match.player1_score,
+        player2_score=match.player2_score,
+        winner=match.winner  # ✅ Store winner
+    )
     db.add(db_match)
     db.commit()
     db.refresh(db_match)
