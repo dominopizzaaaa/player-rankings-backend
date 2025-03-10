@@ -11,7 +11,7 @@ import os
 
 # 🚀 Load MySQL Database URL from Environment Variables
 
-DATABASE_URL = "mysql+pymysql://user:password@host:port/database"
+DATABASE_URL="mysql+pymysql://elo_user:dominopizza@localhost:3306/player_rankings"
 engine = create_engine(DATABASE_URL, echo=True)
 
 # 🚀 Database Setup
