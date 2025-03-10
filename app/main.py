@@ -9,7 +9,7 @@ from pydantic import BaseModel
 import os
 
 # 🚀 Load MySQL Database URL from Environment Variables
-DATABASE_URL = os.getenv("DATABASE_URL", "mysql+aiomysql://root:password@host/player_rankings")
+DATABASE_URL = os.getenv("DATABASE_URL", "mysql+asyncmy://root:password@host/player_rankings")
 
 # 🚀 Database Setup
 engine = create_async_engine(DATABASE_URL, echo=True)
