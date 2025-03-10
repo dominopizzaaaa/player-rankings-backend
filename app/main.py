@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from . import models, schemas, database
 from .models import Match, Player
@@ -11,6 +12,15 @@ models.Base.metadata.create_all(bind=engine)
 
 # Create the FastAPI app
 app = FastAPI()
+
+# CORS configuration to allow frontend requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Allow requests from frontend
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
+)
 
 # Dependency to get a database session
 def get_db():
@@ -25,7 +35,7 @@ def read_root():
     return {"message": "Player Rankings API is running!"}
 
 # Create a player
-@app.post("/players/", response_model=schemas.PlayerResponse)
+@app.post("/players", response_model=schemas.PlayerResponse)
 def create_player(player: schemas.PlayerCreate, db: Session = Depends(get_db)):
     db_player = models.Player(**player.dict())
     db.add(db_player)
@@ -34,7 +44,7 @@ def create_player(player: schemas.PlayerCreate, db: Session = Depends(get_db)):
     return db_player
 
 # Get all players
-@app.get("/players/", response_model=list[schemas.PlayerResponse])
+@app.get("/players", response_model=list[schemas.PlayerResponse])
 def get_players(db: Session = Depends(get_db)):
     return db.query(models.Player).all()
 
@@ -68,7 +78,7 @@ def delete_player(player_id: int, db: Session = Depends(get_db)):
     return {"message": "Player deleted successfully"}
 
 # Submit match results and update Elo ratings
-@app.post("/matches/", response_model=schemas.MatchResponse)
+@app.post("/matches", response_model=schemas.MatchResponse)
 def submit_match(match: MatchCreate, db: Session = Depends(get_db)):
     player1 = db.query(Player).filter(Player.id == match.player1_id).first()
     player2 = db.query(Player).filter(Player.id == match.player2_id).first()
@@ -110,6 +120,6 @@ def submit_match(match: MatchCreate, db: Session = Depends(get_db)):
     return db_match
 
 # Get all match history
-@app.get("/matches/", response_model=list[schemas.MatchResponse])
+@app.get("/matches", response_model=list[schemas.MatchResponse])
 def get_matches(db: Session = Depends(get_db)):
     return db.query(models.Match).all()
