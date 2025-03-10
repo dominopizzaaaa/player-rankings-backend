@@ -67,6 +67,23 @@ def update_rating(player_id: int, rating: int, db: Session = Depends(get_db)):
     db.refresh(player)
     return player
 
+# Create a player
+@app.post("/players", response_model=schemas.PlayerResponse)
+def create_player(player: schemas.PlayerCreate, db: Session = Depends(get_db)):
+    db_player = models.Player(
+        name=player.name,
+        handedness=player.handedness,
+        forehand_rubber=player.forehand_rubber,
+        backhand_rubber=player.backhand_rubber,
+        blade=player.blade,
+        age=player.age,
+        gender=player.gender
+    )
+    db.add(db_player)
+    db.commit()
+    db.refresh(db_player)
+    return db_player
+
 # Delete a player
 @app.delete("/players/{player_id}")
 def delete_player(player_id: int, db: Session = Depends(get_db)):
