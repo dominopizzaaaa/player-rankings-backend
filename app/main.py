@@ -6,6 +6,7 @@ from .models import Match, Player
 from .schemas import MatchCreate, MatchResponse
 from .database import engine, SessionLocal
 from .elo import calculate_elo
+import uvicorn
 
 # Initialize the database
 models.Base.metadata.create_all(bind=engine)
@@ -140,3 +141,6 @@ def submit_match(match: MatchCreate, db: Session = Depends(get_db)):
 @app.get("/matches", response_model=list[schemas.MatchResponse])
 def get_matches(db: Session = Depends(get_db)):
     return db.query(models.Match).all()
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)
