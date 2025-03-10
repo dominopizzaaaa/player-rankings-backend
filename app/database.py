@@ -1,14 +1,25 @@
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
 
-DATABASE_URL="mysql+pymysql://elo_user:dominopizza@localhost:3306/player_rankings"
+# ✅ Use asyncmy instead of pymysql
+DATABASE_URL = "mysql+asyncmy://elo_user:dominopizza@localhost:3306/player_rankings"
 
-engine = create_engine(DATABASE_URL, echo=True)
+# ✅ Use create_async_engine for async operations
+engine = create_async_engine(DATABASE_URL, echo=True)
 
+# ✅ Create an async session
+SessionLocal = sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    autoflush=False,
+    autocommit=False,
+)
 
-
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# ✅ Define Base for models
 Base = declarative_base()
+
+# ✅ Dependency to get the async session
+async def get_db():
+    async with SessionLocal() as session:
+        yield session

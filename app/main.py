@@ -1,36 +1,15 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import Column, Integer, String
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import Column, Integer, String
 from pydantic import BaseModel
-import os
+import uvicorn
 
-# 🚀 Load MySQL Database URL from Environment Variables
+# ✅ Import async database configurations
+from database import Base, engine, get_db, SessionLocal
 
-DATABASE_URL="mysql+pymysql://elo_user:dominopizza@localhost:3306/player_rankings"
-engine = create_engine(DATABASE_URL, echo=True)
-
-# 🚀 Database Setup
-engine = create_async_engine(DATABASE_URL, echo=True)
-SessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,  # Explicitly set async session
-    autoflush=False,
-    autocommit=False,
-)
-
-Base = declarative_base()
-
-# 🚀 Dependency to get DB session
-async def get_db():
-    async with SessionLocal() as session:
-        yield session
-
-# 🚀 Define Player Model
+# ✅ Define Player Model
 class Player(Base):
     __tablename__ = "players"
 
@@ -39,10 +18,10 @@ class Player(Base):
     rating = Column(Integer, default=1500)
     matches = Column(Integer, default=0)
 
-# 🚀 FastAPI App
+# ✅ FastAPI App
 app = FastAPI()
 
-# 🚀 CORS Configuration (Allow requests from frontend)
+# ✅ CORS Configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,10 +31,10 @@ app.add_middleware(
 )
 
 @app.get("/")
-def home():
+async def home():
     return {"message": "Player Rankings API is running!"}
 
-# 🚀 Request Models
+# ✅ Pydantic Models
 class PlayerCreate(BaseModel):
     name: str
 
@@ -64,13 +43,13 @@ class MatchResult(BaseModel):
     player2: str
     winner: str
 
-# 🚀 Initialize Database
+# ✅ Initialize Database on Startup
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-# 🚀 Add Player API
+# ✅ Add Player API
 @app.post("/players")
 async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Player).where(Player.name == player.name))
@@ -85,7 +64,7 @@ async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db)):
     
     return {"message": f"Player {player.name} added successfully!", "rating": 1500, "matches": 0}
 
-# 🚀 Elo Calculation Function
+# ✅ Elo Rating Calculation
 def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     if games_played <= 10:
         K = 40
@@ -97,12 +76,11 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     expected_score = 1 / (1 + 10 ** ((opponent_rating - old_rating) / 400))
     return old_rating + K * (outcome - expected_score)
 
-# 🚀 Submit Match API
+# ✅ Submit Match API
 @app.post("/matches")
 async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     stmt = select(Player).where(Player.name.in_([result.player1, result.player2]))
     players = (await db.execute(stmt)).scalars().all()
-
 
     if len(players) < 2:
         raise HTTPException(status_code=400, detail="Both players must exist.")
@@ -122,8 +100,11 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
         new_rating1 = calculate_elo(player1.rating, player2.rating, 0, games_played_p1)
         new_rating2 = calculate_elo(player2.rating, player1.rating, 1, games_played_p2)
 
-    await db.execute(f"UPDATE players SET rating={round(new_rating1)}, matches=matches+1 WHERE name='{player1.name}'")
-    await db.execute(f"UPDATE players SET rating={round(new_rating2)}, matches=matches+1 WHERE name='{player2.name}'")
+    player1.rating = round(new_rating1)
+    player1.matches += 1
+    player2.rating = round(new_rating2)
+    player2.matches += 1
+
     await db.commit()
 
     return {
@@ -135,13 +116,14 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
         "games_played_p2": games_played_p2 + 1,
     }
 
-# 🚀 Get Rankings API
+# ✅ Get Rankings API
 @app.get("/rankings")
 async def get_rankings(db: AsyncSession = Depends(get_db)):
-    rankings = await db.execute("SELECT name, rating, matches FROM players ORDER BY rating DESC")
-    return [{"name": r.name, "rating": r.rating, "matches": r.matches} for r in rankings.fetchall()]
+    result = await db.execute(select(Player).order_by(Player.rating.desc()))
+    rankings = result.scalars().all()
 
-# 🚀 Run FastAPI with Uvicorn
+    return [{"name": r.name, "rating": r.rating, "matches": r.matches} for r in rankings]
+
+# ✅ Run FastAPI Server
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
