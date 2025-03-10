@@ -9,11 +9,17 @@ from pydantic import BaseModel
 import os
 
 # 🚀 Load MySQL Database URL from Environment Variables
-DATABASE_URL = os.getenv("DATABASE_URL", "mysql+asyncmy://root:password@host/player_rankings")
+DATABASE_URL = os.getenv("DATABASE_URL", "mysql+asyncmy://root:%40xbqpassword1@35.240.170.40")
 
 # 🚀 Database Setup
 engine = create_async_engine(DATABASE_URL, echo=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=AsyncSession)
+SessionLocal = sessionmaker(
+    bind=engine,
+    class_=AsyncSession,  # Explicitly set async session
+    autoflush=False,
+    autocommit=False,
+)
+
 Base = declarative_base()
 
 # 🚀 Dependency to get DB session

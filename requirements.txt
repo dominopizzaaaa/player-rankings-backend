@@ -4,5 +4,4 @@ sqlalchemy
 psycopg2
 alembic
 greenlet
-pymysql
 asyncmy
