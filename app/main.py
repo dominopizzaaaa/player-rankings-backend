@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import Column, Integer, String
+from sqlalchemy.future import select
 from pydantic import BaseModel
 import os
 
@@ -63,8 +64,8 @@ async def startup():
 # 🚀 Add Player API
 @app.post("/players")
 async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(f"SELECT * FROM players WHERE name = '{player.name}'")
-    existing_player = result.fetchone()
+    result = await db.execute(select(Player).where(Player.name == player.name))
+    existing_player = result.scalars().first()
     
     if existing_player:
         raise HTTPException(status_code=400, detail="Player already exists.")
@@ -90,8 +91,9 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
 # 🚀 Submit Match API
 @app.post("/matches")
 async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
-    players = await db.execute(f"SELECT * FROM players WHERE name IN ('{result.player1}', '{result.player2}')")
-    players = players.fetchall()
+    stmt = select(Player).where(Player.name.in_([result.player1, result.player2]))
+    players = (await db.execute(stmt)).scalars().all()
+
 
     if len(players) < 2:
         raise HTTPException(status_code=400, detail="Both players must exist.")
