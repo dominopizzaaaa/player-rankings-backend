@@ -3,6 +3,6 @@ uvicorn
 sqlalchemy
 psycopg2
 alembic
-asyncpg
 greenlet
 pymysql
+asyncmy
