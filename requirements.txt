@@ -5,3 +5,4 @@ alembic
 greenlet
 asyncmy
 aiomysql
+cryptography
