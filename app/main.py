@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import uvicorn
 
 # ✅ Import async database configurations
-from database import Base, engine, get_db, SessionLocal
+from app.database import Base, engine, get_db, SessionLocal
 
 # ✅ Define Player Model
 class Player(Base):
