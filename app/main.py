@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import Column, Integer, String
@@ -9,7 +10,9 @@ from pydantic import BaseModel
 import os
 
 # 🚀 Load MySQL Database URL from Environment Variables
-DATABASE_URL = os.getenv("DATABASE_URL", "mysql+asyncmy://root:%40xbqpassword1@35.240.170.40")
+
+DATABASE_URL = "mysql+pymysql://user:password@host:port/database"
+engine = create_engine(DATABASE_URL, echo=True)
 
 # 🚀 Database Setup
 engine = create_async_engine(DATABASE_URL, echo=True)
