@@ -64,6 +64,14 @@ async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db)):
     
     return {"message": f"Player {player.name} added successfully!", "rating": 1500, "matches": 0}
 
+# ✅ Get All Players API
+@app.get("/players")
+async def get_players(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Player))
+    players = result.scalars().all()
+    return [{"id": p.id, "name": p.name, "rating": p.rating, "matches": p.matches} for p in players]
+
+
 # ✅ Elo Rating Calculation
 def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     if games_played <= 10:
