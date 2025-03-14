@@ -2,9 +2,12 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy.orm import relationship
 from pydantic import BaseModel
 import uvicorn
+from datetime import datetime, timezone
+
 
 # ✅ Import async database configurations
 from app.database import Base, engine, get_db, SessionLocal
@@ -17,6 +20,21 @@ class Player(Base):
     name = Column(String, unique=True, nullable=False)
     rating = Column(Integer, default=1500)
     matches = Column(Integer, default=0)
+
+class Match(Base):
+    __tablename__ = "matches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    player1_score = Column(Integer, nullable=False, default=0)
+    player2_score = Column(Integer, nullable=False, default=0)
+    winner = Column(Integer, ForeignKey("players.id"), nullable=False)
+    timestamp = Column(DateTime, default=datetime.now(timezone.utc))
+
+    player1 = relationship("Player", foreign_keys=[player1_id])
+    player2 = relationship("Player", foreign_keys=[player2_id])
+    match_winner = relationship("Player", foreign_keys=[winner])
 
 # ✅ FastAPI App
 app = FastAPI()
@@ -98,6 +116,14 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     if result.winner not in [result.player1, result.player2]:
         raise HTTPException(status_code=400, detail="Winner must be one of the players.")
 
+    # ✅ Determine winner ID
+    winner = player1 if result.winner == player1.name else player2
+
+    # ✅ Save match to DB
+    new_match = Match(player1_id=player1.id, player2_id=player2.id, winner_id=winner.id)
+    db.add(new_match)
+
+    # ✅ Update player ratings
     games_played_p1 = player1.matches
     games_played_p2 = player2.matches
 
@@ -123,6 +149,25 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
         "new_rating2": round(new_rating2),
         "games_played_p2": games_played_p2 + 1,
     }
+
+@app.get("/matches")
+async def get_matches(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Match))
+    matches = result.scalars().all()
+
+    return [
+        {
+            "id": m.id,
+            "player1": m.player1.name,
+            "player2": m.player2.name,
+            "player1_score": m.player1_score,
+            "player2_score": m.player2_score,
+            "winner": m.match_winner.name,
+            "timestamp": m.timestamp
+        }
+        for m in matches
+    ]
+
 
 # ✅ Get Rankings API
 @app.get("/rankings")
