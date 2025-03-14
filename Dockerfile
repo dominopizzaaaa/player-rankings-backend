@@ -1,18 +1,17 @@
-# Use Python 3.10 base image
-FROM python:3.10
+# Use official Python image
+FROM python:3.11
 
-# Set working directory
+# Set the working directory
 WORKDIR /app
 
-# Copy the application code
+# Copy the application files
 COPY . .
 
-# Force install dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose the application port
+# Expose port 8080 (Google Cloud Run default)
 EXPOSE 8080
 
-# Command to run the FastAPI app
+# Run FastAPI using Uvicorn
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
