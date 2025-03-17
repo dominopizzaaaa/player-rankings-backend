@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, joinedload
 from pydantic import BaseModel
 import uvicorn
 from datetime import datetime, timezone
@@ -194,7 +194,10 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
 
 @app.get("/matches")
 async def get_matches(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Match))
+    result = await db.execute(
+        select(Match)
+        .options(joinedload(Match.player1), joinedload(Match.player2), joinedload(Match.match_winner))
+    )
     matches = result.scalars().all()
 
     return [
