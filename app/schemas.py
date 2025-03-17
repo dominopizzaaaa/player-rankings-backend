@@ -30,7 +30,7 @@ class MatchCreate(BaseModel):
     player2_id: int
     player1_score: int
     player2_score: int
-    winner: int
+    winner_id: int
 
 class MatchResponse(MatchCreate):
     id: int
