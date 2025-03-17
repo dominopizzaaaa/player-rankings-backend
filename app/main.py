@@ -142,7 +142,8 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
         player2_id=player2.id, 
         player1_score=result.player1_score, 
         player2_score=result.player2_score, 
-        winner_id=winner.id
+        winner_id=winner.id,
+        timestamp=datetime.now(timezone.utc)  # ✅ Explicitly set timestamp
     )
     db.add(new_match)
 
