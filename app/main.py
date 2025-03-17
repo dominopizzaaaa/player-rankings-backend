@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, delete
 from sqlalchemy.orm import relationship, joinedload
 from pydantic import BaseModel
 import uvicorn
@@ -232,17 +232,14 @@ async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
     if not player:
         raise HTTPException(status_code=404, detail="Player not found.")
 
-    # Optional: Check if player has played matches before deletion
-    match_result = await db.execute(select(Match).where((Match.player1_id == player_id) | (Match.player2_id == player_id)))
-    existing_matches = match_result.scalars().all()
+    # ✅ Delete all matches where the player was involved
+    await db.execute(delete(Match).where((Match.player1_id == player_id) | (Match.player2_id == player_id)))
 
-    if existing_matches:
-        raise HTTPException(status_code=400, detail="Cannot delete player with existing matches.")
-
+    # ✅ Delete the player after removing matches
     await db.delete(player)
     await db.commit()
 
-    return {"message": f"Player {player.name} deleted successfully."}
+    return {"message": f"Player {player.name} and their matches deleted successfully."}
 
 # ✅ Delete Match API
 @app.delete("/matches/{match_id}")
