@@ -106,29 +106,36 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
 # ✅ Submit Match API
 @app.post("/matches")
 async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
-    stmt = select(Player).where(Player.name.in_([result.player1, result.player2]))
+    # ✅ Fetch players by ID instead of names
+    stmt = select(Player).where(Player.id.in_([result.player1_id, result.player2_id]))
     players = (await db.execute(stmt)).scalars().all()
 
     if len(players) < 2:
         raise HTTPException(status_code=400, detail="Both players must exist.")
 
-    player1, player2 = players if players[0].name == result.player1 else players[::-1]
+    player1, player2 = players if players[0].id == result.player1_id else players[::-1]
 
-    if result.winner not in [result.player1, result.player2]:
+    if result.winner_id not in [player1.id, player2.id]:
         raise HTTPException(status_code=400, detail="Winner must be one of the players.")
 
     # ✅ Determine winner ID
-    winner = player1 if result.winner == player1.name else player2
+    winner = player1 if result.winner_id == player1.id else player2
 
     # ✅ Save match to DB
-    new_match = Match(player1_id=player1.id, player2_id=player2.id, winner_id=winner.id)
+    new_match = Match(
+        player1_id=player1.id, 
+        player2_id=player2.id, 
+        player1_score=result.player1_score, 
+        player2_score=result.player2_score, 
+        winner=winner.id
+    )
     db.add(new_match)
 
     # ✅ Update player ratings
     games_played_p1 = player1.matches
     games_played_p2 = player2.matches
 
-    if result.winner == result.player1:
+    if result.winner_id == player1.id:
         new_rating1 = calculate_elo(player1.rating, player2.rating, 1, games_played_p1)
         new_rating2 = calculate_elo(player2.rating, player1.rating, 0, games_played_p2)
     else:
@@ -143,10 +150,10 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     return {
-        "player1": result.player1,
+        "player1": player1.name,
         "new_rating1": round(new_rating1),
         "games_played_p1": games_played_p1 + 1,
-        "player2": result.player2,
+        "player2": player2.name,
         "new_rating2": round(new_rating2),
         "games_played_p2": games_played_p2 + 1,
     }
