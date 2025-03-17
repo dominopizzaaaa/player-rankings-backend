@@ -186,7 +186,7 @@ async def get_matches(db: AsyncSession = Depends(get_db)):
             "player2": m.player2.name,
             "player1_score": m.player1_score,
             "player2_score": m.player2_score,
-            "winner_id": m.match_winner.id,
+            "winner_id": m.winner_id,
             "timestamp": m.timestamp
         }
         for m in matches
