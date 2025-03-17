@@ -30,12 +30,12 @@ class Match(Base):
     player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     player1_score = Column(Integer, nullable=False, default=0)
     player2_score = Column(Integer, nullable=False, default=0)
-    winner = Column(Integer, ForeignKey("players.id"), nullable=False)
+    winner_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     timestamp = Column(DateTime, default=datetime.now(timezone.utc))
 
     player1 = relationship("Player", foreign_keys=[player1_id])
     player2 = relationship("Player", foreign_keys=[player2_id])
-    match_winner = relationship("Player", foreign_keys=[winner])
+    match_winner = relationship("Player", foreign_keys=[winner_id])
 
 # ✅ FastAPI App
 app = FastAPI()
@@ -118,7 +118,7 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     if result.winner_id not in [player1.id, player2.id]:
         raise HTTPException(status_code=400, detail="Winner must be one of the players.")
 
-    # ✅ Determine winner ID
+    # ✅ Determine winner
     winner = player1 if result.winner_id == player1.id else player2
 
     # ✅ Save match to DB
@@ -127,7 +127,7 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
         player2_id=player2.id, 
         player1_score=result.player1_score, 
         player2_score=result.player2_score, 
-        winner=winner.id
+        winner_id=winner.id
     )
     db.add(new_match)
 
