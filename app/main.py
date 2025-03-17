@@ -176,7 +176,6 @@ async def get_matches(db: AsyncSession = Depends(get_db)):
         for m in matches
     ]
 
-
 # ✅ Get Rankings API
 @app.get("/rankings")
 async def get_rankings(db: AsyncSession = Depends(get_db)):
