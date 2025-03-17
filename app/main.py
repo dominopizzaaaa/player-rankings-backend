@@ -8,6 +8,11 @@ from pydantic import BaseModel
 import uvicorn
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
+import logging
+
+# ✅ Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 # ✅ Import async database configurations
@@ -118,23 +123,30 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     expected_score = 1 / (1 + 10 ** ((opponent_rating - old_rating) / 400))
     return old_rating + K * (outcome - expected_score)
 
-# ✅ Submit Match API
+# ✅ Submit Match API with logging
 @app.post("/matches")
 async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
+    logger.info("Received match submission: %s", result.dict())
+
     # ✅ Fetch players by ID instead of names
     stmt = select(Player).where(Player.id.in_([result.player1_id, result.player2_id]))
     players = (await db.execute(stmt)).scalars().all()
 
+    logger.info("Fetched players: %s", [(p.id, p.name, p.rating, p.matches) for p in players])
+
     if len(players) < 2:
+        logger.error("Both players must exist in the database.")
         raise HTTPException(status_code=400, detail="Both players must exist.")
 
     player1, player2 = players if players[0].id == result.player1_id else players[::-1]
 
     if result.winner_id not in [player1.id, player2.id]:
+        logger.error("Winner ID %s is not one of the players.", result.winner_id)
         raise HTTPException(status_code=400, detail="Winner must be one of the players.")
 
     # ✅ Determine winner
     winner = player1 if result.winner_id == player1.id else player2
+    logger.info("Winner determined: %s", winner.name)
 
     # ✅ Save match to DB
     new_match = Match(
@@ -146,6 +158,7 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
         timestamp=datetime.now(timezone.utc)  # ✅ Explicitly set timestamp
     )
     db.add(new_match)
+    logger.info("Match added to DB session: %s", new_match)
 
     # ✅ Update player ratings
     games_played_p1 = player1.matches
@@ -158,12 +171,17 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
         new_rating1 = calculate_elo(player1.rating, player2.rating, 0, games_played_p1)
         new_rating2 = calculate_elo(player2.rating, player1.rating, 1, games_played_p2)
 
+    logger.info("New ratings calculated: %s -> %s, %s -> %s", 
+                player1.name, round(new_rating1), 
+                player2.name, round(new_rating2))
+
     player1.rating = round(new_rating1)
     player1.matches += 1
     player2.rating = round(new_rating2)
     player2.matches += 1
 
     await db.commit()
+    logger.info("Match committed to DB.")
 
     return MatchResponse(
             player1=player1.name,
