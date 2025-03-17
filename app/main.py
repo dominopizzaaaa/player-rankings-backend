@@ -37,6 +37,23 @@ class Match(Base):
     player2 = relationship("Player", foreign_keys=[player2_id])
     match_winner = relationship("Player", foreign_keys=[winner_id])
 
+# ✅ Pydantic Models
+class PlayerCreate(BaseModel):
+    name: str
+
+class MatchResult(BaseModel):
+    player1: str
+    player2: str
+    winner: str
+    
+class MatchResponse(BaseModel):
+    player1: str
+    new_rating1: int
+    games_played_p1: int
+    player2: str
+    new_rating2: int
+    games_played_p2: int
+
 # ✅ FastAPI App
 app = FastAPI()
 
@@ -52,15 +69,6 @@ app.add_middleware(
 @app.get("/")
 async def home():
     return {"message": "Player Rankings API is running!"}
-
-# ✅ Pydantic Models
-class PlayerCreate(BaseModel):
-    name: str
-
-class MatchResult(BaseModel):
-    player1: str
-    player2: str
-    winner: str
 
 # ✅ Initialize Database on Startup
 @app.on_event("startup")
@@ -105,7 +113,7 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
 
 # ✅ Submit Match API
 @app.post("/matches")
-async def submit_match(result: Match, db: AsyncSession = Depends(get_db)):
+async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     # ✅ Fetch players by ID instead of names
     stmt = select(Player).where(Player.id.in_([result.player1_id, result.player2_id]))
     players = (await db.execute(stmt)).scalars().all()
@@ -149,14 +157,14 @@ async def submit_match(result: Match, db: AsyncSession = Depends(get_db)):
 
     await db.commit()
 
-    return {
-        "player1": player1.name,
-        "new_rating1": round(new_rating1),
-        "games_played_p1": games_played_p1 + 1,
-        "player2": player2.name,
-        "new_rating2": round(new_rating2),
-        "games_played_p2": games_played_p2 + 1,
-    }
+    return MatchResponse(
+            player1=player1.name,
+            new_rating1=round(new_rating1),
+            games_played_p1=games_played_p1 + 1,
+            player2=player2.name,
+            new_rating2=round(new_rating2),
+            games_played_p2=games_played_p2 + 1
+        )
 
 @app.get("/matches")
 async def get_matches(db: AsyncSession = Depends(get_db)):
