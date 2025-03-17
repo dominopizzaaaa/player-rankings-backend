@@ -62,11 +62,16 @@ app = FastAPI()
 # ✅ CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://player-rankings-frontend-omega.vercel.app",  # ✅ Allow frontend domain
+        "http://localhost:3000",  # ✅ Allow local dev frontend
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # ✅ Ensure all methods are allowed
+    allow_headers=["*"],  # ✅ Allow all headers
+    expose_headers=["*"],  # ✅ Expose headers in response
 )
+
 
 @app.get("/")
 async def home():
@@ -180,7 +185,7 @@ async def get_matches(db: AsyncSession = Depends(get_db)):
             "player2": m.player2.name,
             "player1_score": m.player1_score,
             "player2_score": m.player2_score,
-            "winner": m.match_winner.name,
+            "winner": m.match_winner.id,
             "timestamp": m.timestamp
         }
         for m in matches
