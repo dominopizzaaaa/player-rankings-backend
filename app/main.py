@@ -42,10 +42,12 @@ class PlayerCreate(BaseModel):
     name: str
 
 class MatchResult(BaseModel):
-    player1: str
-    player2: str
-    winner: str
-    
+    player1_id: int
+    player2_id: int
+    player1_score: int
+    player2_score: int
+    winner_id: int
+
 class MatchResponse(BaseModel):
     player1: str
     new_rating1: int
