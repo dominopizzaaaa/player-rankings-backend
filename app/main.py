@@ -7,6 +7,7 @@ from sqlalchemy.orm import relationship
 from pydantic import BaseModel
 import uvicorn
 from datetime import datetime, timezone
+from sqlalchemy.exc import IntegrityError
 
 
 # ✅ Import async database configurations
@@ -176,6 +177,42 @@ async def get_rankings(db: AsyncSession = Depends(get_db)):
     rankings = result.scalars().all()
 
     return [{"name": r.name, "rating": r.rating, "matches": r.matches} for r in rankings]
+
+# ✅ Delete Player API
+@app.delete("/players/{player_id}")
+async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Player).where(Player.id == player_id))
+    player = result.scalars().first()
+
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found.")
+
+    # Optional: Check if player has played matches before deletion
+    match_result = await db.execute(select(Match).where((Match.player1_id == player_id) | (Match.player2_id == player_id)))
+    existing_matches = match_result.scalars().all()
+
+    if existing_matches:
+        raise HTTPException(status_code=400, detail="Cannot delete player with existing matches.")
+
+    await db.delete(player)
+    await db.commit()
+
+    return {"message": f"Player {player.name} deleted successfully."}
+
+# ✅ Delete Match API
+@app.delete("/matches/{match_id}")
+async def delete_match(match_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Match).where(Match.id == match_id))
+    match = result.scalars().first()
+
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found.")
+
+    await db.delete(match)
+    await db.commit()
+
+    return {"message": f"Match {match.id} deleted successfully."}
+
 
 # ✅ Run FastAPI Server
 if __name__ == "__main__":
