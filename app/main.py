@@ -105,7 +105,7 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
 
 # ✅ Submit Match API
 @app.post("/matches")
-async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
+async def submit_match(result: Match, db: AsyncSession = Depends(get_db)):
     # ✅ Fetch players by ID instead of names
     stmt = select(Player).where(Player.id.in_([result.player1_id, result.player2_id]))
     players = (await db.execute(stmt)).scalars().all()
