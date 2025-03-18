@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -9,6 +9,7 @@ import uvicorn
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
 import logging
+from sqlalchemy import text
 
 # ✅ Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,9 +22,15 @@ class Player(Base):
     __tablename__ = "players"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
-    rating = Column(Integer, default=1500)
+    name = Column(String(100), nullable=False)  # ✅ Explicit length added
     matches = Column(Integer, default=0)
+    rating = Column(Integer, default=1500)
+    handedness = Column(String(10), nullable=True)  # ✅ Explicit length added
+    forehand_rubber = Column(String(100), nullable=True)  # ✅ Explicit length added
+    backhand_rubber = Column(String(100), nullable=True)  # ✅ Explicit length added
+    blade = Column(String(100), nullable=True)  # ✅ Explicit length added
+    age = Column(Integer, nullable=True)
+    gender = Column(String(10), nullable=True)  # ✅ Explicit length added
 
 class Match(Base):
     __tablename__ = "matches"
@@ -67,7 +74,7 @@ app.add_middleware(
         "http://localhost:3000",  # ✅ Allow local dev frontend
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # ✅ Ensure all methods are allowed
+    allow_methods=["*"],  # ✅ Ensure all methods are allowed
     allow_headers=["*"],  # ✅ Allow all headers
     expose_headers=["*"],  # ✅ Expose headers in response
 )
@@ -107,15 +114,17 @@ async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
     print(f"Fetching player with ID: {player_id}")
 
     try:
-        #result = await db.execute(select(Player).where(Player.id == player_id))
-        #player = result.scalars().first()
         result = await db.execute(select(Player).where(Player.id == player_id))
         player = result.scalars().first()
-
 
         if not player:
             logger.warning(f"Player {player_id} not found.")
             raise HTTPException(status_code=404, detail="Player not found.")
+
+        # Debugging: Check if 'handedness' exists
+        if not hasattr(player, "handedness"):
+            print("DEBUG: 'handedness' attribute is missing from the Player model!")
+            raise HTTPException(status_code=500, detail="Player model does not match database schema")
 
         logger.info(f"Player found: {player.name} (ID: {player.id})")
 
@@ -124,14 +133,13 @@ async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
             "name": player.name,
             "rating": player.rating,
             "matches": player.matches if player.matches is not None else 0,
-            "handedness": player.handedness or "Unknown",
+            "handedness": player.handedness if player.handedness is not None else "Unknown",
             "forehand_rubber": player.forehand_rubber or "Unknown",
             "backhand_rubber": player.backhand_rubber or "Unknown",
             "blade": player.blade or "Unknown",
             "age": player.age if player.age is not None else "Unknown",
             "gender": player.gender or "Unknown"
         }
-
 
     except Exception as e:
         logger.error(f"Error fetching player {player_id}: {e}", exc_info=True)
@@ -275,6 +283,40 @@ async def delete_match(match_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     return {"message": f"Match {match.id} deleted successfully."}
+
+@app.patch("/players/{player_id}")
+async def update_player(player_id: int, player_update: dict, db: AsyncSession = Depends(get_db)):
+    stmt = select(Player).where(Player.id == player_id)
+    result = await db.execute(stmt)
+    player = result.scalars().first()
+
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    for key, value in player_update.items():
+        if hasattr(player, key) and value is not None:
+            setattr(player, key, value)
+
+    await db.commit()
+    await db.refresh(player)
+    return player
+
+@app.patch("/matches/{match_id}")
+async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depends(get_db)):
+    # ✅ Fetch the match asynchronously
+    result = await db.execute(select(Match).where(Match.id == match_id))
+    match = result.scalars().first()
+
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found.")
+
+    # ✅ Update match attributes dynamically
+    for key, value in update_data.items():
+        if hasattr(match, key) and value is not None:
+            setattr(match, key, value)
+
+    await db.commit()
+    return {"message": f"Match {match_id} updated successfully.", "updated_data": update_data}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
