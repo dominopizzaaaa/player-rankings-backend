@@ -5,7 +5,7 @@ from datetime import datetime
 # ✅ Define PlayerBase first
 class PlayerBase(BaseModel):
     name: str
-    matches_played: int = 0
+    matches: int = 0
     rating: int = 1000
     handedness: Optional[str] = None
     forehand_rubber: Optional[str] = None
