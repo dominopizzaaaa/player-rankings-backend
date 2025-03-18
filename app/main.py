@@ -101,6 +101,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://player-rankings-frontend-omega.vercel.app",  # ✅ Allow frontend domain
+        "https://player-rankings-frontend-auaueau4n-xiao-bai-qius-projects.vercel.app"
         "http://localhost:3000",  # ✅ Allow local dev frontend
     ],
     allow_credentials=True,
