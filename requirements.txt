@@ -6,3 +6,5 @@ greenlet
 asyncmy
 aiomysql
 cryptography
+python-jose
+cryptography

@@ -1,22 +1,46 @@
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, delete
 from sqlalchemy.orm import relationship, joinedload
 from pydantic import BaseModel
 import uvicorn
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.exc import IntegrityError
 import logging
 from sqlalchemy import text
+from jose import JWTError, jwt
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
 
 # ✅ Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
 # ✅ Import async database configurations
 from app.database import Base, engine, get_db, SessionLocal
+
+# ✅ Function to check if the user is an admin
+async def is_admin(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("role") != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access forbidden: Admins only",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Login to change details",
+            headers={"WWW-Authenticate": "Bearer realm='Login required'"}
+        )
 
 class Player(Base):
     __tablename__ = "players"
@@ -89,14 +113,8 @@ async def startup():
         await conn.run_sync(Base.metadata.create_all)
 
 @app.post("/players")
-async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Player).where(Player.name == player.name))
-    existing_player = result.scalars().first()
-    
-    if existing_player:
-        raise HTTPException(status_code=400, detail="Player already exists.")
-    
-    new_player = Player(name=player.name)
+async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
+    new_player = Player(name=player.name)  # ✅ No duplicate check
     db.add(new_player)
     await db.commit()
     
@@ -160,7 +178,7 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
 async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     logger.info("Received match submission: %s", result.dict())
 
-    # ✅ Fetch players by ID instead of names
+    # ✅ Fetch players using async execution
     stmt = select(Player).where(Player.id.in_([result.player1_id, result.player2_id]))
     players = (await db.execute(stmt)).scalars().all()
 
@@ -190,39 +208,23 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
         timestamp=datetime.now(timezone.utc)  # ✅ Explicitly set timestamp
     )
     db.add(new_match)
-    logger.info("Match added to DB session: %s", new_match)
 
-    # ✅ Update player ratings
-    games_played_p1 = player1.matches
-    games_played_p2 = player2.matches
+    # ✅ Ensure the session commits properly
+    try:
+        await db.commit()
+        logger.info("Match committed to DB.")
+    except Exception as e:
+        await db.rollback()
+        logger.error("Error committing match: %s", e)
+        raise HTTPException(status_code=500, detail="Database commit error")
 
-    if result.winner_id == player1.id:
-        new_rating1 = calculate_elo(player1.rating, player2.rating, 1, games_played_p1)
-        new_rating2 = calculate_elo(player2.rating, player1.rating, 0, games_played_p2)
-    else:
-        new_rating1 = calculate_elo(player1.rating, player2.rating, 0, games_played_p1)
-        new_rating2 = calculate_elo(player2.rating, player1.rating, 1, games_played_p2)
-
-    logger.info("New ratings calculated: %s -> %s, %s -> %s", 
-                player1.name, round(new_rating1), 
-                player2.name, round(new_rating2))
-
-    player1.rating = round(new_rating1)
-    player1.matches += 1
-    player2.rating = round(new_rating2)
-    player2.matches += 1
-
-    await db.commit()
-    logger.info("Match committed to DB.")
-
-    return MatchResponse(
-            player1=player1.name,
-            new_rating1=round(new_rating1),
-            games_played_p1=games_played_p1 + 1,
-            player2=player2.name,
-            new_rating2=round(new_rating2),
-            games_played_p2=games_played_p2 + 1
-        )
+    return {
+        "message": "Match successfully recorded",
+        "player1": player1.name,
+        "player1_new_rating": player1.rating,
+        "player2": player2.name,
+        "player2_new_rating": player2.rating
+    }
 
 @app.get("/matches")
 async def get_matches(db: AsyncSession = Depends(get_db)):
@@ -255,7 +257,7 @@ async def get_rankings(db: AsyncSession = Depends(get_db)):
     return [{"name": r.name, "rating": r.rating, "matches": r.matches} for r in rankings]
 
 @app.delete("/players/{player_id}")
-async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_player(player_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     result = await db.execute(select(Player).where(Player.id == player_id))
     player = result.scalars().first()
 
@@ -272,20 +274,25 @@ async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
     return {"message": f"Player {player.name} and their matches deleted successfully."}
 
 @app.delete("/matches/{match_id}")
-async def delete_match(match_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_match(match_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
+    # ✅ Check if the match exists
     result = await db.execute(select(Match).where(Match.id == match_id))
     match = result.scalars().first()
 
     if not match:
-        raise HTTPException(status_code=404, detail="Match not found.")
+        logger.warning(f"Delete failed: Match {match_id} not found.")
+        raise HTTPException(status_code=404, detail=f"Match {match_id} not found.")
 
+    # ✅ Delete the match
     await db.delete(match)
     await db.commit()
+    
+    logger.info(f"Match {match_id} deleted successfully.")
+    return {"message": f"Match {match_id} deleted successfully."}
 
-    return {"message": f"Match {match.id} deleted successfully."}
 
 @app.patch("/players/{player_id}")
-async def update_player(player_id: int, player_update: dict, db: AsyncSession = Depends(get_db)):
+async def update_player(player_id: int, player_update: dict, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     stmt = select(Player).where(Player.id == player_id)
     result = await db.execute(stmt)
     player = result.scalars().first()
@@ -302,7 +309,7 @@ async def update_player(player_id: int, player_update: dict, db: AsyncSession = 
     return player
 
 @app.patch("/matches/{match_id}")
-async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depends(get_db)):
+async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     # ✅ Fetch the match asynchronously
     result = await db.execute(select(Match).where(Match.id == match_id))
     match = result.scalars().first()
@@ -320,3 +327,65 @@ async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depe
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
+
+
+# LOGGING IN & SECURITY
+    
+# Secret key for encoding/decoding JWT tokens
+SECRET_KEY = "supersecretkey"  # Change this in production!
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour token expiration
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+# Admin credentials (for simplicity, stored here; use a database in production)
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "password123"
+
+fake_admin_db = {
+    "admin": {"username": "admin", "password": "admin123", "role": "admin"}
+}
+
+@app.post("/token")
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = fake_admin_db.get(form_data.username)
+    if not user or user["password"] != form_data.password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token_data = {"sub": user["username"], "role": user["role"]}
+    token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+
+    return {"access_token": token, "token_type": "bearer"}
+
+# Helper function to create a JWT token
+def create_access_token(data: dict, expires_delta: timedelta):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + expires_delta
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# ✅ Login route to authenticate admin and return token
+@app.post("/login")
+async def login(request: Request):
+    credentials = await request.json()
+    if credentials["username"] != ADMIN_USERNAME or credentials["password"] != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = create_access_token({"sub": credentials["username"]}, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    return {"access_token": token, "token_type": "bearer"}
+
+# ✅ Middleware to protect admin routes
+def verify_admin(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username != ADMIN_USERNAME:
+            raise HTTPException(status_code=403, detail="Admin access required")
+        return username
+    except JWTError:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+# ✅ Protect restricted routes
+@app.get("/admin-only")
+async def admin_dashboard(username: str = Depends(verify_admin)):
+    return {"message": "Welcome, Admin!"}
+
