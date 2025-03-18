@@ -120,13 +120,14 @@ async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
             "name": player.name,
             "rating": player.rating,
             "matches": player.matches,
-            "handedness": player.handedness,
-            "forehand_rubber": player.forehand_rubber,
-            "backhand_rubber": player.backhand_rubber,
-            "blade": player.blade,
-            "age": player.age,
-            "gender": player.gender
+            "handedness": player.handedness or "Unknown",
+            "forehand_rubber": player.forehand_rubber or "Unknown",
+            "backhand_rubber": player.backhand_rubber or "Unknown",
+            "blade": player.blade or "Unknown",
+            "age": player.age if player.age is not None else "Unknown",
+            "gender": player.gender or "Unknown"
         }
+
 
     except Exception as e:
         logger.error(f"Error fetching player {player_id}: {e}", exc_info=True)
