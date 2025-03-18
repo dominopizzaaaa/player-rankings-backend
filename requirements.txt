@@ -8,3 +8,4 @@ aiomysql
 cryptography
 python-jose
 cryptography
+python-dotenv
