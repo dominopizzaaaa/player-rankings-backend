@@ -104,6 +104,7 @@ async def get_players(db: AsyncSession = Depends(get_db)):
 @app.get("/players/{player_id}")
 async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
     logger.info(f"Fetching player with ID: {player_id}")
+    print(f"Fetching player with ID: {player_id}")
 
     try:
         result = await db.execute(select(Player).where(Player.id == player_id))
@@ -119,7 +120,7 @@ async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
             "id": player.id,
             "name": player.name,
             "rating": player.rating,
-            "matches": player.matches,
+            "matches": player.matches if player.matches is not None else 0,
             "handedness": player.handedness or "Unknown",
             "forehand_rubber": player.forehand_rubber or "Unknown",
             "backhand_rubber": player.backhand_rubber or "Unknown",
