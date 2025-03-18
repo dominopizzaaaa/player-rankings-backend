@@ -14,11 +14,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 # ✅ Import async database configurations
 from app.database import Base, engine, get_db, SessionLocal
 
-# ✅ Define Player Model
 class Player(Base):
     __tablename__ = "players"
 
@@ -42,7 +40,6 @@ class Match(Base):
     player2 = relationship("Player", foreign_keys=[player2_id])
     match_winner = relationship("Player", foreign_keys=[winner_id])
 
-# ✅ Pydantic Models
 class PlayerCreate(BaseModel):
     name: str
 
@@ -106,25 +103,35 @@ async def get_players(db: AsyncSession = Depends(get_db)):
 
 @app.get("/players/{player_id}")
 async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Player).where(Player.id == player_id))
-    player = result.scalars().first()
+    logger.info(f"Fetching player with ID: {player_id}")
 
-    if not player:
-        raise HTTPException(status_code=404, detail="Player not found.")
+    try:
+        result = await db.execute(select(Player).where(Player.id == player_id))
+        player = result.scalars().first()
 
-    return {
-        "id": player.id,
-        "name": player.name,
-        "rating": player.rating,
-        "matches_played": player.matches_played,
-        "handedness": player.handedness,
-        "forehand_rubber": player.forehand_rubber,
-        "backhand_rubber": player.backhand_rubber,
-        "blade": player.blade,
-        "age": player.age,
-        "gender": player.gender
-    }
+        if not player:
+            logger.warning(f"Player {player_id} not found.")
+            raise HTTPException(status_code=404, detail="Player not found.")
 
+        logger.info(f"Player found: {player.name} (ID: {player.id})")
+
+        return {
+            "id": player.id,
+            "name": player.name,
+            "rating": player.rating,
+            "matches_played": player.matches_played,
+            "handedness": player.handedness,
+            "forehand_rubber": player.forehand_rubber,
+            "backhand_rubber": player.backhand_rubber,
+            "blade": player.blade,
+            "age": player.age,
+            "gender": player.gender
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching player {player_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    
 def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     if games_played <= 10:
         K = 40
