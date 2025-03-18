@@ -9,3 +9,4 @@ cryptography
 python-jose
 cryptography
 python-dotenv
+python-multipart
