@@ -99,10 +99,12 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://player-rankings-frontend-omega.vercel.app",  # ✅ Allow frontend domain
-        "https://player-rankings-frontend-auaueau4n-xiao-bai-qius-projects.vercel.app"
-        "http://localhost:3000",  # ✅ Allow local dev frontend
+    allow_origins = [
+        "https://player-rankings-frontend-omega.vercel.app",
+        "https://player-rankings-frontend-xiao-bai-qius-projects.vercel.app",
+        "https://player-rankings-frontend-git-main-xiao-bai-qius-projects.vercel.app",
+        "https://player-rankings-frontend-9a11owqx4-xiao-bai-qius-projects.vercel.app",
+        "http://localhost:3000",  # ✅ Allow local development
     ],
     allow_credentials=True,
     allow_methods=["*"],  # ✅ Ensure all methods are allowed
