@@ -109,7 +109,9 @@ async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
     try:
         #result = await db.execute(select(Player).where(Player.id == player_id))
         #player = result.scalars().first()
-        player = await db.get(Player, player_id)
+        result = await db.execute(select(Player).where(Player.id == player_id))
+        player = result.scalars().first()
+
 
         if not player:
             logger.warning(f"Player {player_id} not found.")
