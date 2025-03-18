@@ -61,10 +61,8 @@ class MatchResponse(BaseModel):
     new_rating2: int
     games_played_p2: int
 
-# ✅ FastAPI App
 app = FastAPI()
 
-# ✅ CORS Configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -77,18 +75,15 @@ app.add_middleware(
     expose_headers=["*"],  # ✅ Expose headers in response
 )
 
-
 @app.get("/")
 async def home():
     return {"message": "Player Rankings API is running!"}
 
-# ✅ Initialize Database on Startup
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-# ✅ Add Player API
 @app.post("/players")
 async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Player).where(Player.name == player.name))
@@ -103,15 +98,33 @@ async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db)):
     
     return {"message": f"Player {player.name} added successfully!", "rating": 1500, "matches": 0}
 
-# ✅ Get All Players API
 @app.get("/players")
 async def get_players(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Player))
     players = result.scalars().all()
     return [{"id": p.id, "name": p.name, "rating": p.rating, "matches": p.matches} for p in players]
 
+@app.get("/players/{player_id}")
+async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Player).where(Player.id == player_id))
+    player = result.scalars().first()
 
-# ✅ Elo Rating Calculation
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found.")
+
+    return {
+        "id": player.id,
+        "name": player.name,
+        "rating": player.rating,
+        "matches_played": player.matches_played,
+        "handedness": player.handedness,
+        "forehand_rubber": player.forehand_rubber,
+        "backhand_rubber": player.backhand_rubber,
+        "blade": player.blade,
+        "age": player.age,
+        "gender": player.gender
+    }
+
 def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     if games_played <= 10:
         K = 40
@@ -123,7 +136,6 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     expected_score = 1 / (1 + 10 ** ((opponent_rating - old_rating) / 400))
     return old_rating + K * (outcome - expected_score)
 
-# ✅ Submit Match API with logging
 @app.post("/matches")
 async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     logger.info("Received match submission: %s", result.dict())
@@ -215,7 +227,6 @@ async def get_matches(db: AsyncSession = Depends(get_db)):
         for m in matches
     ]
 
-# ✅ Get Rankings API
 @app.get("/rankings")
 async def get_rankings(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Player).order_by(Player.rating.desc()))
@@ -223,7 +234,6 @@ async def get_rankings(db: AsyncSession = Depends(get_db)):
 
     return [{"name": r.name, "rating": r.rating, "matches": r.matches} for r in rankings]
 
-# ✅ Delete Player API
 @app.delete("/players/{player_id}")
 async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Player).where(Player.id == player_id))
@@ -241,7 +251,6 @@ async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
 
     return {"message": f"Player {player.name} and their matches deleted successfully."}
 
-# ✅ Delete Match API
 @app.delete("/matches/{match_id}")
 async def delete_match(match_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Match).where(Match.id == match_id))
@@ -255,7 +264,5 @@ async def delete_match(match_id: int, db: AsyncSession = Depends(get_db)):
 
     return {"message": f"Match {match.id} deleted successfully."}
 
-
-# ✅ Run FastAPI Server
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
