@@ -8,16 +8,23 @@ from sqlalchemy.orm import relationship, joinedload
 from pydantic import BaseModel
 import uvicorn
 from datetime import datetime, timezone, timedelta
-from sqlalchemy.exc import IntegrityError
 import logging
 from sqlalchemy import text
 from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from dotenv import load_dotenv
+import os
 
 # ✅ Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+load_dotenv()
+
+# ✅ Get admin credentials from .env
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -331,22 +338,26 @@ if __name__ == "__main__":
 
 # LOGGING IN & SECURITY
     
-# Secret key for encoding/decoding JWT tokens
-SECRET_KEY = "supersecretkey"  # Change this in production!
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour token expiration
+# ✅ Get secrets from environment variables
+SECRET_KEY = os.getenv("SECRET_KEY", "fallback_key")  # Fallback in case it's missing
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-# Admin credentials (for simplicity, stored here; use a database in production)
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "password123"
 
+# ✅ Load Admin Credentials Securely
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "password123")
+
+# Optional: Fake Admin DB Example (Could be removed if using a real database)
 fake_admin_db = {
-    "admin": {"username": "admin", "password": "admin123", "role": "admin"}
+    ADMIN_USERNAME: {"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD, "role": "admin"}
 }
 
 @app.post("/token")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    print("DEBUG: Login attempt with", form_data.username, form_data.password)  # Debugging
+
     user = fake_admin_db.get(form_data.username)
     if not user or user["password"] != form_data.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
