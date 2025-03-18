@@ -9,7 +9,6 @@ from pydantic import BaseModel
 import uvicorn
 from datetime import datetime, timezone, timedelta
 import logging
-from sqlalchemy import text
 from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
