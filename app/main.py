@@ -119,7 +119,7 @@ async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
             "id": player.id,
             "name": player.name,
             "rating": player.rating,
-            "matches_played": player.matches_played,
+            "matches_played": player.matches,
             "handedness": player.handedness,
             "forehand_rubber": player.forehand_rubber,
             "backhand_rubber": player.backhand_rubber,
