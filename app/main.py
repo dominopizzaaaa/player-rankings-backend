@@ -107,8 +107,9 @@ async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
     print(f"Fetching player with ID: {player_id}")
 
     try:
-        result = await db.execute(select(Player).where(Player.id == player_id))
-        player = result.scalars().first()
+        #result = await db.execute(select(Player).where(Player.id == player_id))
+        #player = result.scalars().first()
+        player = await db.get(Player, player_id)
 
         if not player:
             logger.warning(f"Player {player_id} not found.")
