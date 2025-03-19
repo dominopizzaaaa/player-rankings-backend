@@ -267,7 +267,7 @@ async def get_rankings(db: AsyncSession = Depends(get_db)):
     return [{"name": r.name, "rating": r.rating, "matches": r.matches} for r in rankings]
 
 @app.delete("/players/{player_id}")
-async def delete_player(player_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
+async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Player).where(Player.id == player_id))
     player = result.scalars().first()
 
