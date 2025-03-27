@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Date, Boolean, Enum
-from sqlalchemy.sql import relationship
+from sqlalchemy.orm import relationship
 from .database import Base
 import enum
 from datetime import datetime, timezone
@@ -41,13 +41,12 @@ class Tournament(Base):
     __tablename__ = "tournaments"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
+    name = Column(String(100), nullable=False)
     date = Column(Date, nullable=False)
     num_players = Column(Integer, nullable=False)
     num_groups = Column(Integer, nullable=False)
     knockout_size = Column(Integer, nullable=False)
     grouping_mode = Column(Enum(GroupingMode), nullable=False)
-    created_by = Column(String, nullable=False)  # or Integer if linking to a user table
     created_at = Column(Date, nullable=False)
 
 
@@ -67,7 +66,7 @@ class TournamentMatch(Base):
     id = Column(Integer, primary_key=True, index=True)
     tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
     match_id = Column(Integer, ForeignKey("matches.id"), nullable=True)
-    stage = Column(String, nullable=False)  # e.g., "RR", "KO"
+    stage = Column(String(5), nullable=False)  # e.g., "RR", "KO"
     group_number = Column(Integer, nullable=True)
     round_number = Column(Integer, nullable=True)
     winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)

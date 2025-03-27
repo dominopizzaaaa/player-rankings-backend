@@ -15,7 +15,17 @@ logger = logging.getLogger(__name__)
 
 @app.post("/players")
 async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
-    new_player = Player(name=player.name)  # ✅ No duplicate check
+    new_player = Player(
+        name=player.name,
+        matches=player.matches,
+        rating=player.rating,
+        handedness=player.handedness,
+        forehand_rubber=player.forehand_rubber,
+        backhand_rubber=player.backhand_rubber,
+        blade=player.blade,
+        age=player.age,
+        gender=player.gender
+    )
     db.add(new_player)
     await db.commit()
     

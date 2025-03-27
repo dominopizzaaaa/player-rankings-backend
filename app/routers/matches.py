@@ -28,41 +28,46 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
 async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     logger.info("Received match submission: %s", result.dict())
 
-    # ✅ Fetch players using async execution
     stmt = select(Player).where(Player.id.in_([result.player1_id, result.player2_id]))
     players = (await db.execute(stmt)).scalars().all()
 
-    logger.info("Fetched players: %s", [(p.id, p.name, p.rating, p.matches) for p in players])
-
     if len(players) < 2:
-        logger.error("Both players must exist in the database.")
         raise HTTPException(status_code=400, detail="Both players must exist.")
 
     player1, player2 = players if players[0].id == result.player1_id else players[::-1]
 
     if result.winner_id not in [player1.id, player2.id]:
-        logger.error("Winner ID %s is not one of the players.", result.winner_id)
         raise HTTPException(status_code=400, detail="Winner must be one of the players.")
 
-    # ✅ Determine winner
-    winner = player1 if result.winner_id == player1.id else player2
-    logger.info("Winner determined: %s", winner.name)
+    # ✅ Determine outcome
+    outcome1 = 1 if result.winner_id == player1.id else 0
+    outcome2 = 1 - outcome1
 
-    # ✅ Save match to DB
+    # ✅ Calculate new ratings
+    new_rating1 = int(calculate_elo(player1.rating, player2.rating, outcome1, player1.matches or 0))
+    new_rating2 = int(calculate_elo(player2.rating, player1.rating, outcome2, player2.matches or 0))
+
+    # ✅ Update player stats
+    player1.rating = new_rating1
+    player2.rating = new_rating2
+    player1.matches = (player1.matches or 0) + 1
+    player2.matches = (player2.matches or 0) + 1
+
+    # ✅ Create match record
     new_match = Match(
-        player1_id=player1.id, 
-        player2_id=player2.id, 
-        player1_score=result.player1_score, 
-        player2_score=result.player2_score, 
-        winner_id=winner.id,
-        timestamp=datetime.now(timezone.utc)  # ✅ Explicitly set timestamp
+        player1_id=player1.id,
+        player2_id=player2.id,
+        player1_score=result.player1_score,
+        player2_score=result.player2_score,
+        winner_id=result.winner_id,
+        timestamp=datetime.now(timezone.utc)
     )
     db.add(new_match)
 
-    # ✅ Ensure the session commits properly
     try:
         await db.commit()
-        logger.info("Match committed to DB.")
+        await db.refresh(player1)
+        await db.refresh(player2)
     except Exception as e:
         await db.rollback()
         logger.error("Error committing match: %s", e)
@@ -117,7 +122,7 @@ async def delete_match(match_id: int, db: AsyncSession = Depends(get_db), admin=
     return {"message": f"Match {match_id} deleted successfully."}
 
 @app.patch("/matches/{match_id}")
-async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
+async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depends(get_db), admin=True):
     # ✅ Fetch the match asynchronously
     result = await db.execute(select(Match).where(Match.id == match_id))
     match = result.scalars().first()

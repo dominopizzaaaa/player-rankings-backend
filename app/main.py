@@ -5,11 +5,14 @@ from sqlalchemy.future import select
 import uvicorn
 import logging
 from dotenv import load_dotenv
-import os
 
 from app.database import Base, engine, get_db
 from app.models import Player
 from app.auth import router as auth_router
+from app.routers.players import app as players_router
+from app.routers.matches import app as matches_router
+from app.routers import tournaments
+
 
 # ✅ Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -58,6 +61,12 @@ async def get_rankings(db: AsyncSession = Depends(get_db)):
 
 # ✅ Include the authentication routes
 app.include_router(auth_router)
+
+# ✅ Register routers
+app.include_router(players_router, prefix="/players", tags=["Players"])
+app.include_router(matches_router, prefix="/matches", tags=["Matches"])
+app.include_router(auth_router, tags=["Auth"])
+app.include_router(tournaments.router)
 
 # ✅ Run locally
 if __name__ == "__main__":
