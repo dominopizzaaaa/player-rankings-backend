@@ -3,9 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, delete
-from sqlalchemy.orm import relationship, joinedload
-from pydantic import BaseModel
+from sqlalchemy import delete
+from sqlalchemy.orm import joinedload
 import uvicorn
 from datetime import datetime, timezone, timedelta
 import logging
@@ -13,6 +12,8 @@ from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
 import os
+from app.models import Player, Match, GroupingMode, Tournament, TournamentPlayer, TournamentMatch
+from app.schemas import PlayerCreate, MatchResult, MatchResponse
 
 # ✅ Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -47,53 +48,6 @@ async def is_admin(token: str = Depends(oauth2_scheme)):
             detail="Login to change details",
             headers={"WWW-Authenticate": "Bearer realm='Login required'"}
         )
-
-class Player(Base):
-    __tablename__ = "players"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)  # ✅ Explicit length added
-    matches = Column(Integer, default=0)
-    rating = Column(Integer, default=1500)
-    handedness = Column(String(10), nullable=True)  # ✅ Explicit length added
-    forehand_rubber = Column(String(100), nullable=True)  # ✅ Explicit length added
-    backhand_rubber = Column(String(100), nullable=True)  # ✅ Explicit length added
-    blade = Column(String(100), nullable=True)  # ✅ Explicit length added
-    age = Column(Integer, nullable=True)
-    gender = Column(String(10), nullable=True)  # ✅ Explicit length added
-
-class Match(Base):
-    __tablename__ = "matches"
-
-    id = Column(Integer, primary_key=True, index=True)
-    player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    player1_score = Column(Integer, nullable=False, default=0)
-    player2_score = Column(Integer, nullable=False, default=0)
-    winner_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    timestamp = Column(DateTime, default=datetime.now(timezone.utc))
-
-    player1 = relationship("Player", foreign_keys=[player1_id])
-    player2 = relationship("Player", foreign_keys=[player2_id])
-    match_winner = relationship("Player", foreign_keys=[winner_id])
-
-class PlayerCreate(BaseModel):
-    name: str
-
-class MatchResult(BaseModel):
-    player1_id: int
-    player2_id: int
-    player1_score: int
-    player2_score: int
-    winner_id: int
-
-class MatchResponse(BaseModel):
-    player1: str
-    new_rating1: int
-    games_played_p1: int
-    player2: str
-    new_rating2: int
-    games_played_p2: int
 
 app = FastAPI()
 

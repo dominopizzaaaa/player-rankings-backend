@@ -1,21 +1,22 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Date, Boolean, Enum
-from sqlalchemy.sql import func
+from sqlalchemy.sql import relationship
 from .database import Base
 import enum
+from datetime import datetime, timezone
 
 class Player(Base):
     __tablename__ = "players"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
+    name = Column(String(100), nullable=False)  # ✅ Explicit length added
     matches = Column(Integer, default=0)
-    rating = Column(Integer, default=1000)
-    handedness = Column(String(10), nullable=True)  # Right or Left
-    forehand_rubber = Column(String(100), nullable=True)
-    backhand_rubber = Column(String(100), nullable=True)
-    blade = Column(String(100), nullable=True)
+    rating = Column(Integer, default=1500)
+    handedness = Column(String(10), nullable=True)  # ✅ Explicit length added
+    forehand_rubber = Column(String(100), nullable=True)  # ✅ Explicit length added
+    backhand_rubber = Column(String(100), nullable=True)  # ✅ Explicit length added
+    blade = Column(String(100), nullable=True)  # ✅ Explicit length added
     age = Column(Integer, nullable=True)
-    gender = Column(String(10), nullable=True)
+    gender = Column(String(10), nullable=True)  # ✅ Explicit length added
 
 class Match(Base):
     __tablename__ = "matches"
@@ -23,10 +24,14 @@ class Match(Base):
     id = Column(Integer, primary_key=True, index=True)
     player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    player1_score = Column(Integer, nullable=False)
-    player2_score = Column(Integer, nullable=False)
-    winner_id = Column(Integer, ForeignKey("players.id"), nullable=False)  # ✅ Add winner
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    player1_score = Column(Integer, nullable=False, default=0)
+    player2_score = Column(Integer, nullable=False, default=0)
+    winner_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    timestamp = Column(DateTime, default=datetime.now(timezone.utc))
+
+    player1 = relationship("Player", foreign_keys=[player1_id])
+    player2 = relationship("Player", foreign_keys=[player2_id])
+    match_winner = relationship("Player", foreign_keys=[winner_id])
 
 class GroupingMode(enum.Enum):
     RANKED = "ranked"
