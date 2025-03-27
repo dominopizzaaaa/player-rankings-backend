@@ -48,6 +48,7 @@ class Tournament(Base):
     knockout_size = Column(Integer, nullable=False)
     grouping_mode = Column(Enum(GroupingMode), nullable=False)
     created_at = Column(Date, nullable=False)
+    players = relationship("TournamentPlayer", back_populates="tournament", cascade="all, delete-orphan")
 
 
 class TournamentPlayer(Base):
@@ -58,6 +59,7 @@ class TournamentPlayer(Base):
     player_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     group_number = Column(Integer, nullable=False)
     seed = Column(Integer, nullable=True)  # based on Elo
+    tournament = relationship("Tournament", back_populates="players")
 
 
 class TournamentMatch(Base):

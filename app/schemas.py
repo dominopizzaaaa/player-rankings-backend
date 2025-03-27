@@ -1,7 +1,10 @@
 from typing import Optional
 from pydantic import BaseModel
-from datetime import date, datetime
+from datetime import datetime
 from enum import Enum
+from typing import List
+from datetime import date as dt_date
+
 
 class PlayerCreate(BaseModel):
     name: str
@@ -35,15 +38,22 @@ class GroupingMode(str, Enum):
 
 class TournamentCreate(BaseModel):
     name: str
-    date: date
+    date: dt_date
+    num_groups: int
+    knockout_size: int
+    grouping_mode: GroupingMode
+    player_ids: List[int]  # ✅ New field
+
+class TournamentResponse(BaseModel):
+    id: int
+    name: str
+    date: dt_date
     num_players: int
     num_groups: int
     knockout_size: int
     grouping_mode: GroupingMode
-
-class TournamentResponse(TournamentCreate):
-    id: int
-    created_at: datetime
+    created_at: dt_date
+    player_ids: List[int]  # ✅ Required in response
 
     class Config:
         orm_mode = True

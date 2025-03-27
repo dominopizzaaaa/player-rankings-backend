@@ -10,7 +10,7 @@ from app.schemas import MatchResult
 from app.database import get_db
 from app.auth import is_admin
 
-app = APIRouter()
+router = APIRouter()
 logger = logging.getLogger(__name__)
 
 def calculate_elo(old_rating, opponent_rating, outcome, games_played):
@@ -24,7 +24,7 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     expected_score = 1 / (1 + 10 ** ((opponent_rating - old_rating) / 400))
     return old_rating + K * (outcome - expected_score)
 
-@app.post("/matches")
+@router.post("/")
 async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     logger.info("Received match submission: %s", result.dict())
 
@@ -81,7 +81,7 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
         "player2_new_rating": player2.rating
     }
 
-@app.get("/matches")
+@router.get("/")
 async def get_matches(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Match)
@@ -104,7 +104,7 @@ async def get_matches(db: AsyncSession = Depends(get_db)):
         for m in matches
     ]
 
-@app.delete("/matches/{match_id}")
+@router.delete("/{match_id}")
 async def delete_match(match_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     # ✅ Check if the match exists
     result = await db.execute(select(Match).where(Match.id == match_id))
@@ -121,7 +121,7 @@ async def delete_match(match_id: int, db: AsyncSession = Depends(get_db), admin=
     logger.info(f"Match {match_id} deleted successfully.")
     return {"message": f"Match {match_id} deleted successfully."}
 
-@app.patch("/matches/{match_id}")
+@router.patch("/{match_id}")
 async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depends(get_db), admin=True):
     # ✅ Fetch the match asynchronously
     result = await db.execute(select(Match).where(Match.id == match_id))

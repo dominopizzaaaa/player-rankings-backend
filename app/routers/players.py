@@ -9,11 +9,11 @@ from app.schemas import PlayerCreate
 from app.database import get_db
 from app.auth import is_admin
 
-app = APIRouter()
+router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@app.post("/players")
+@router.post("/")
 async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     new_player = Player(
         name=player.name,
@@ -31,13 +31,13 @@ async def add_player(player: PlayerCreate, db: AsyncSession = Depends(get_db), a
     
     return {"message": f"Player {player.name} added successfully!", "rating": 1500, "matches": 0}
 
-@app.get("/players")
+@router.get("/")
 async def get_players(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Player))
     players = result.scalars().all()
     return [{"id": p.id, "name": p.name, "rating": p.rating, "matches": p.matches} for p in players]
 
-@app.get("/players/{player_id}")
+@router.get("/{player_id}")
 async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
     logger.info(f"Fetching player with ID: {player_id}")
     print(f"Fetching player with ID: {player_id}")
@@ -74,7 +74,7 @@ async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
         logger.error(f"Error fetching player {player_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal Server Error")
     
-@app.delete("/players/{player_id}")
+@router.delete("/{player_id}")
 async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Player).where(Player.id == player_id))
     player = result.scalars().first()
@@ -91,7 +91,7 @@ async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
 
     return {"message": f"Player {player.name} and their matches deleted successfully."}
 
-@app.patch("/players/{player_id}")
+@router.patch("/{player_id}")
 async def update_player(player_id: int, player_update: dict, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     stmt = select(Player).where(Player.id == player_id)
     result = await db.execute(stmt)

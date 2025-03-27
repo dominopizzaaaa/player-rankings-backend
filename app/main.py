@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 from app.database import Base, engine, get_db
 from app.models import Player
 from app.auth import router as auth_router
-from app.routers.players import app as players_router
-from app.routers.matches import app as matches_router
+from app.routers.players import router as players_router
+from app.routers.matches import router as matches_router
 from app.routers import tournaments
 
 
