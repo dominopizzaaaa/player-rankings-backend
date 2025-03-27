@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Date, Boolean, Enum
 from sqlalchemy.sql import func
 from .database import Base
+import enum
 
 class Player(Base):
     __tablename__ = "players"
@@ -26,3 +27,43 @@ class Match(Base):
     player2_score = Column(Integer, nullable=False)
     winner_id = Column(Integer, ForeignKey("players.id"), nullable=False)  # ✅ Add winner
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+class GroupingMode(enum.Enum):
+    RANKED = "ranked"
+    RANDOM = "random"
+
+class Tournament(Base):
+    __tablename__ = "tournaments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    date = Column(Date, nullable=False)
+    num_players = Column(Integer, nullable=False)
+    num_groups = Column(Integer, nullable=False)
+    knockout_size = Column(Integer, nullable=False)
+    grouping_mode = Column(Enum(GroupingMode), nullable=False)
+    created_by = Column(String, nullable=False)  # or Integer if linking to a user table
+    created_at = Column(Date, nullable=False)
+
+
+class TournamentPlayer(Base):
+    __tablename__ = "tournament_players"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
+    player_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    group_number = Column(Integer, nullable=False)
+    seed = Column(Integer, nullable=True)  # based on Elo
+
+
+class TournamentMatch(Base):
+    __tablename__ = "tournament_matches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
+    match_id = Column(Integer, ForeignKey("matches.id"), nullable=True)
+    stage = Column(String, nullable=False)  # e.g., "RR", "KO"
+    group_number = Column(Integer, nullable=True)
+    round_number = Column(Integer, nullable=True)
+    winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)
+    updated = Column(Boolean, default=False)
