@@ -90,8 +90,10 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
         await generate_group_stage_matches(new_tournament.id, db)
     else:
         await generate_knockout_stage_matches(new_tournament, db)
+    tournament_id = new_tournament.id  # Access before commit
     await db.commit()
-    return {"message": "Tournament created and matches generated", "tournament_id": new_tournament.id}
+    return {"message": "Tournament created and matches generated", "tournament_id": tournament_id}
+
 
 # ✅ Get all tournaments (public)
 from sqlalchemy.orm import selectinload
