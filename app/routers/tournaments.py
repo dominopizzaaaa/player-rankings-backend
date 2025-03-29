@@ -61,7 +61,6 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
     await db.commit()
     return {"message": "Tournament created and matches generated", "tournament_id": tournament_id}
 
-
 @router.get("/", response_model=List[TournamentResponse])
 async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -88,7 +87,6 @@ async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
 
     return response
 
-
 @router.get("/{tournament_id}", response_model=TournamentResponse)
 async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Tournament).where(Tournament.id == tournament_id))
@@ -108,7 +106,6 @@ async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db))
         created_at=tournament.created_at,
         player_ids=player_ids
     )
-
 
 @router.get("/{tournament_id}/details", response_model=TournamentDetailsResponse)
 async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(get_db)):
@@ -260,6 +257,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         group_rankings[group_num] = ranked
 
     group_matrix["rankings"] = group_rankings
+    group_matrix["player_stats"] = player_stats
 
     return TournamentDetailsResponse(
         id=tournament.id,
@@ -301,7 +299,6 @@ async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
                 ))
     await db.commit()
 
-
 async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSession):
     result = await db.execute(
         select(TournamentPlayer.player_id)
@@ -334,7 +331,6 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
         ))
 
     await db.commit()
-
 
 @router.post("/matches/{match_id}/result")
 async def submit_tournament_match_result(
