@@ -69,7 +69,7 @@ class TournamentMatchResponse(BaseModel):
     winner_id: Optional[int]
     round: str
     stage: str
-    set_scores: List[List[int]] = [] 
+    set_scores: Optional[List[List[int]]] = []  # ✅ must be here
 
     class Config:
         from_attributes = True

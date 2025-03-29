@@ -150,7 +150,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     )
     set_scores_by_match = {}
     for s in score_results.scalars().all():
-        set_scores_by_match.setdefault(s.match_id, []).append([s.player1_set_score, s.player2_set_score])
+        set_scores_by_match.setdefault(s.match_id, []).append([s.player1_score, s.player2_score])
 
     # 4. Categorize matches
     group_matches = []
