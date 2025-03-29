@@ -51,6 +51,11 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
             ))
     tournament_id = new_tournament.id
     await db.commit()
+    if tournament.num_groups > 0:
+        await generate_group_stage_matches(tournament_id, db)
+    else:
+        await generate_knockout_stage_matches(new_tournament, db)
+
     return {"message": "Tournament created successfully", "tournament_id": tournament_id}
 
 # ✅ Get all tournaments (public)
@@ -183,3 +188,76 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         individual_matches=individual_matches,
         final_standings=final_standings,
     )
+
+async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
+    # Get all tournament players grouped by group number
+    result = await db.execute(
+        select(TournamentPlayer)
+        .where(TournamentPlayer.tournament_id == tournament_id)
+        .order_by(TournamentPlayer.group_number)
+    )
+    players = result.scalars().all()
+
+    groups = {}
+    for player in players:
+        if player.group_number not in groups:
+            groups[player.group_number] = []
+        groups[player.group_number].append(player.player_id)
+
+    # Generate round-robin matches for each group
+    match_sequence = 1
+    for group_number, player_ids in groups.items():
+        n = len(player_ids)
+        for i in range(n):
+            for j in range(i + 1, n):
+                match = TournamentMatch(
+                    tournament_id=tournament_id,
+                    player1_id=player_ids[i],
+                    player2_id=player_ids[j],
+                    round=f"Group {group_number + 1}",
+                    stage="group"
+                )
+                db.add(match)
+                match_sequence += 1
+    await db.commit()
+
+async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSession):
+    result = await db.execute(
+        select(TournamentPlayer.player_id, TournamentPlayer.group_number, TournamentPlayer.seed)
+        .where(TournamentPlayer.tournament_id == tournament.id)
+    )
+    tournament_players = result.all()
+    player_ids = [tp[0] for tp in tournament_players]
+
+    # Fetch Elo ratings for players
+    from app.models import Player  # 🔄 Add this import at the top if not already there
+
+    elo_result = await db.execute(
+        select(Player.id, Player.rating).where(Player.id.in_(player_ids))
+    )
+    ratings = elo_result.all()
+    player_ratings = {player_id: rating for player_id, rating in ratings}
+
+    if tournament.grouping_mode == GroupingMode.RANKED:
+        sorted_players = sorted(player_ids, key=lambda pid: -player_ratings.get(pid, 0))
+    else:
+        sorted_players = player_ids[:]
+        random.shuffle(sorted_players)
+
+    knockout_participants = sorted_players[:tournament.knockout_size]
+
+    match_sequence = 1
+    for i in range(0, len(knockout_participants), 2):
+        if i + 1 >= len(knockout_participants):
+            break  # Skip if odd player count
+        match = TournamentMatch(
+            tournament_id=tournament.id,
+            player1_id=knockout_participants[i],
+            player2_id=knockout_participants[i + 1],
+            round="Round of {}".format(len(knockout_participants)),
+            stage="knockout"
+        )
+        db.add(match)
+        match_sequence += 1
+
+    await db.commit()
