@@ -2,7 +2,7 @@ from typing import Optional
 from pydantic import BaseModel
 from datetime import datetime
 from enum import Enum
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 from datetime import date as dt_date
 
 
@@ -92,7 +92,7 @@ class TournamentDetailsResponse(BaseModel):
     knockout_matches: List[TournamentMatchResponse]
     individual_matches: List[TournamentMatchResponse]
     final_standings: List[int]  # 1st to 4th place player_ids
-    group_matrix: Dict[str, GroupMatrixEntry]
+    group_matrix: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
