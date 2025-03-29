@@ -7,13 +7,13 @@ from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsR
 from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.auth import is_admin
+from app.schemas import MatchResult
 import random
 from sqlalchemy.orm import selectinload, aliased
 from typing import List
 
 router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
 
-# ✅ Create a new tournament (admin only)
 @router.post("/", response_model=dict)
 async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Depends(get_db), admin=True):
     new_tournament = Tournament(
@@ -53,18 +53,8 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
 
     await db.flush()
 
-    # ✅ Generate matches
     if tournament.num_groups > 0:
-        for group_number, group_players in group_map.items():
-            for i in range(len(group_players)):
-                for j in range(i + 1, len(group_players)):
-                    db.add(TournamentMatch(
-                        tournament_id=new_tournament.id,
-                        player1_id=group_players[i],
-                        player2_id=group_players[j],
-                        round="1",
-                        stage="group"
-                    ))
+        await generate_group_stage_matches(new_tournament.id, db)
     else:
         # Straight to knockout — assume single elimination
         num_matches = tournament.knockout_size // 2
@@ -94,8 +84,6 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
     await db.commit()
     return {"message": "Tournament created and matches generated", "tournament_id": tournament_id}
 
-
-# ✅ Get all tournaments (public)
 from sqlalchemy.orm import selectinload
 @router.get("/", response_model=List[TournamentResponse])
 async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
@@ -124,9 +112,6 @@ async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
 
     return response
 
-
-
-# ✅ Get a specific tournament by ID (public)
 @router.get("/{tournament_id}", response_model=TournamentResponse)
 async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Tournament).where(Tournament.id == tournament_id))
@@ -298,3 +283,20 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
         match_sequence += 1
 
     await db.commit()
+
+@router.post("/matches/{match_id}/result")
+async def submit_match_result(match_id: int, result: MatchResult, db: AsyncSession = Depends(get_db)):
+    match = await db.get(TournamentMatch, match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    # Optional safety check (match.player1_id and player2_id must match)
+    if match.player1_id != result.player1_id or match.player2_id != result.player2_id:
+        raise HTTPException(status_code=400, detail="Player IDs do not match the match record.")
+
+    match.winner_id = result.winner_id
+    match.player1_score = result.player1_score
+    match.player2_score = result.player2_score
+    await db.commit()
+
+    return {"message": "Match result submitted"}
