@@ -164,7 +164,16 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     result = await db.execute(match_query)
     matches = result.all()
 
-    # 3. Categorize matches
+    # 3. Fetch all set scores for these matches
+    match_ids = [m.id for m in matches]
+    score_results = await db.execute(
+        select(TournamentSetScore).where(TournamentSetScore.match_id.in_(match_ids))
+    )
+    set_scores_by_match = {}
+    for s in score_results.scalars().all():
+        set_scores_by_match.setdefault(s.match_id, []).append([s.player1_set_score, s.player2_set_score])
+
+    # 4. Categorize matches
     group_matches = []
     knockout_matches = []
     individual_matches = []
@@ -181,6 +190,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
             winner_id=match.winner_id,
             round=match.round,
             stage=match.stage,
+            set_scores=set_scores_by_match.get(match.id, [])
         )
         
         if match.stage == "group":
@@ -190,11 +200,10 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         else:
             individual_matches.append(match_obj)
 
+    # 5. Final standings (placeholder for now)
+    final_standings = []
 
-    # 4. Final standings (placeholder for now, implement logic later)
-    final_standings = []  # You can add logic to determine 1st–4th based on knockout
-
-    # 5. Return detailed response
+    # 6. Return response
     return TournamentDetailsResponse(
         id=tournament.id,
         name=tournament.name,

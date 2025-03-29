@@ -62,18 +62,17 @@ class TournamentMatchResponse(BaseModel):
     id: int
     player1_id: int
     player2_id: int
-    player1_name: str  # NEW
-    player2_name: str  # NEW
+    player1_name: str
+    player2_name: str
     player1_score: Optional[int]
     player2_score: Optional[int]
     winner_id: Optional[int]
     round: str
     stage: str
+    set_scores: List[List[int]] = [] 
 
     class Config:
         from_attributes = True
-
-
 
 class TournamentDetailsResponse(BaseModel):
     id: int
