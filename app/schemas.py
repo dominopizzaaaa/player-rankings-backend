@@ -115,6 +115,8 @@ class SetScore(BaseModel):
 class TournamentMatchResult(BaseModel):
     player1_id: int
     player2_id: int
+    player1_score: int  # ✅ Added
+    player2_score: int  # ✅ Added
     winner_id: int
     sets: List[SetScore]  # variable number of sets
 
