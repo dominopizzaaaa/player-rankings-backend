@@ -84,6 +84,12 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
                 stage="knockout"
             ))
 
+    await db.flush()
+    # ✅ Generate group matches
+    if tournament.num_groups > 0:
+        await generate_group_stage_matches(new_tournament.id, db)
+    else:
+        await generate_knockout_stage_matches(new_tournament, db)
     await db.commit()
     return {"message": "Tournament created and matches generated", "tournament_id": new_tournament.id}
 
