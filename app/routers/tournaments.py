@@ -391,6 +391,60 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
     db.add_all(matches)
     await db.commit()
 
+async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
+    # 1. Get all knockout matches, ordered by round name
+    result = await db.execute(
+        select(TournamentMatch)
+        .where(TournamentMatch.tournament_id == tournament_id)
+        .where(TournamentMatch.stage == "knockout")
+        .order_by(TournamentMatch.round)
+    )
+    matches = result.scalars().all()
+
+    if not matches:
+        return  # No knockout matches to process
+
+    # 2. Group matches by round
+    from collections import defaultdict
+    rounds = defaultdict(list)
+    for m in matches:
+        rounds[m.round].append(m)
+
+    # 3. Get the most recent round (last one with matches)
+    last_round_name = sorted(rounds.keys())[-1]
+    last_round_matches = rounds[last_round_name]
+
+    # 4. Check if all matches in that round are completed
+    if any(m.winner_id is None for m in last_round_matches):
+        return  # Still waiting on results
+
+    # 5. Get winners
+    winners = [m.winner_id for m in last_round_matches if m.winner_id]
+
+    if len(winners) <= 1:
+        return  # Tournament complete or not enough players for another round
+
+    # 6. Seed next round (pair winners in order)
+    next_round_name = f"Round of {len(winners)}"
+
+    for i in range(0, len(winners), 2):
+        p1 = winners[i]
+        p2 = winners[i + 1] if i + 1 < len(winners) else None
+
+        match = TournamentMatch(
+            tournament_id=tournament_id,
+            player1_id=p1,
+            player2_id=p2,
+            round=next_round_name,
+            stage="knockout",
+            winner_id=p1 if p2 is None else None,
+            player1_score=1 if p2 is None else None,
+            player2_score=0 if p2 is None else None,
+        )
+        db.add(match)
+
+    await db.commit()
+
 @router.post("/matches/{match_id}/result")
 async def submit_tournament_match_result(
     match_id: int,
@@ -418,4 +472,5 @@ async def submit_tournament_match_result(
         ))
 
     await db.commit()
+    await advance_knockout_rounds(db_match.tournament_id, db)
     return {"message": "Tournament match result recorded"}
