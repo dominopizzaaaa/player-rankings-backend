@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
-from app.models import Tournament, GroupingMode, TournamentPlayer
-from app.schemas import TournamentCreate, TournamentResponse
+from app.models import Tournament, GroupingMode, TournamentPlayer, TournamentMatch, Player
+from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse
+from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.auth import is_admin
 import random
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, aliased
 from typing import List
 
 router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
@@ -104,3 +105,81 @@ async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db))
         player_ids=player_ids
     )
 
+@router.get("/{tournament_id}/details", response_model=TournamentDetailsResponse)
+async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(get_db)):
+    # 1. Get the tournament
+    result = await db.execute(select(Tournament).where(Tournament.id == tournament_id))
+    tournament = result.scalars().first()
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found.")
+
+    # 2. Get all matches for this tournament
+    Player1 = aliased(Player)
+    Player2 = aliased(Player)
+
+    match_query = (
+        select(
+            TournamentMatch.id,
+            TournamentMatch.tournament_id,
+            TournamentMatch.player1_id,
+            TournamentMatch.player2_id,
+            Player1.name.label("player1_name"),
+            Player2.name.label("player2_name"),
+            TournamentMatch.player1_score,
+            TournamentMatch.player2_score,
+            TournamentMatch.winner_id,
+            TournamentMatch.round,
+            TournamentMatch.stage,
+        )
+        .join(Player1, TournamentMatch.player1_id == Player1.id)
+        .join(Player2, TournamentMatch.player2_id == Player2.id)
+        .where(TournamentMatch.tournament_id == tournament_id)
+    )
+    result = await db.execute(match_query)
+    matches = result.all()
+
+    # 3. Categorize matches
+    group_matches = []
+    knockout_matches = []
+    individual_matches = []
+
+    for match in matches:
+        match_obj = TournamentMatchResponse(
+            id=match.id,
+            player1_id=match.player1_id,
+            player2_id=match.player2_id,
+            player1_name=match.player1_name,
+            player2_name=match.player2_name,
+            player1_score=match.player1_score,
+            player2_score=match.player2_score,
+            winner_id=match.winner_id,
+            round=match.round,
+            stage=match.stage,
+        )
+        
+        if match.stage == "group":
+            group_matches.append(match_obj)
+        elif match.stage == "knockout":
+            knockout_matches.append(match_obj)
+        else:
+            individual_matches.append(match_obj)
+
+
+    # 4. Final standings (placeholder for now, implement logic later)
+    final_standings = []  # You can add logic to determine 1st–4th based on knockout
+
+    # 5. Return detailed response
+    return TournamentDetailsResponse(
+        id=tournament.id,
+        name=tournament.name,
+        date=tournament.date,
+        num_players=tournament.num_players,
+        num_groups=tournament.num_groups,
+        knockout_size=tournament.knockout_size,
+        grouping_mode=tournament.grouping_mode,
+        created_at=tournament.created_at,
+        group_matches=group_matches,
+        knockout_matches=knockout_matches,
+        individual_matches=individual_matches,
+        final_standings=final_standings,
+    )

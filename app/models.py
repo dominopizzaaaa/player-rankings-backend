@@ -62,14 +62,16 @@ class TournamentPlayer(Base):
     tournament = relationship("Tournament", back_populates="players")
 
 
+# TournamentMatch model if not yet defined
 class TournamentMatch(Base):
     __tablename__ = "tournament_matches"
 
     id = Column(Integer, primary_key=True, index=True)
     tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
-    match_id = Column(Integer, ForeignKey("matches.id"), nullable=True)
-    stage = Column(String(5), nullable=False)  # e.g., "RR", "KO"
-    group_number = Column(Integer, nullable=True)
-    round_number = Column(Integer, nullable=True)
+    player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    player1_score = Column(Integer, nullable=True)
+    player2_score = Column(Integer, nullable=True)
     winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)
-    updated = Column(Boolean, default=False)
+    round = Column(String(50), nullable=False)  # e.g., "Group A", "Quarterfinal", "Final"
+    stage = Column(String(20), nullable=False)  # "group" or "knockout"

@@ -57,3 +57,47 @@ class TournamentResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+class TournamentMatchResponse(BaseModel):
+    id: int
+    player1_id: int
+    player2_id: int
+    player1_name: str  # NEW
+    player2_name: str  # NEW
+    player1_score: Optional[int]
+    player2_score: Optional[int]
+    winner_id: Optional[int]
+    round: str
+    stage: str
+
+    class Config:
+        from_attributes = True
+
+
+
+class TournamentDetailsResponse(BaseModel):
+    id: int
+    name: str
+    date: dt_date
+    num_players: int
+    num_groups: int
+    knockout_size: int
+    grouping_mode: GroupingMode
+    created_at: datetime
+    group_matches: List[TournamentMatchResponse]
+    knockout_matches: List[TournamentMatchResponse]
+    individual_matches: List[TournamentMatchResponse]
+    final_standings: List[int]  # 1st to 4th place player_ids
+
+    class Config:
+        from_attributes = True
+
+class MatchInfo(BaseModel):
+    id: int
+    player1_id: int
+    player2_id: int
+    player1_score: int
+    player2_score: int
+    winner_id: Optional[int]
+    round: int
+    stage: str
