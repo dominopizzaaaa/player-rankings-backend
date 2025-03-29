@@ -347,8 +347,38 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
         p1 = bracket[i]
         p2 = bracket[i + 1] if i + 1 < KO_SIZE else None
 
-        if p1 is None or p2 is None:
-            continue  # Skip incomplete pairings for now (can mark as auto-win if needed)
+        if p1 is None and p2 is None:
+            continue  # Skip invalid match entirely
+        elif p1 is None:
+            winner = p2
+            loser = None
+        elif p2 is None:
+            winner = p1
+            loser = None
+        else:
+            # Regular match, no free pass
+            db.add(TournamentMatch(
+                tournament_id=tournament.id,
+                player1_id=p1,
+                player2_id=p2,
+                round=f"Round of {KO_SIZE}",
+                stage="knockout"
+            ))
+            continue
+
+        # Auto-win case
+        match = TournamentMatch(
+            tournament_id=tournament.id,
+            player1_id=p1 or p2,
+            player2_id=None,
+            winner_id=winner,
+            player1_score=1,
+            player2_score=0,
+            round=f"Round of {KO_SIZE}",
+            stage="knockout"
+        )
+        db.add(match)
+
 
         matches.append(TournamentMatch(
             tournament_id=tournament.id,
