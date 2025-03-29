@@ -26,7 +26,7 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
         num_players=len(tournament.player_ids)
     )
     db.add(new_tournament)
-    await db.flush()  # Get tournament ID
+    await db.flush()  # Assigns new_tournament.id
 
     players = tournament.player_ids[:]
 
@@ -52,35 +52,14 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
             ))
 
     await db.flush()
+    tournament_id = new_tournament.id  # Store before commit
 
+    # ✅ Call generators using tournament_id only (no lazy loading)
     if tournament.num_groups > 0:
-        await generate_group_stage_matches(new_tournament.id, db)
+        await generate_group_stage_matches(tournament_id, db)
     else:
-        # Straight to knockout — assume single elimination
-        num_matches = tournament.knockout_size // 2
-        selected_players = players[:tournament.knockout_size]
-        if tournament.grouping_mode == GroupingMode.RANDOM:
-            random.shuffle(selected_players)
-        else:
-            # assume sorted by elo rating later
-            pass
+        await generate_knockout_stage_matches(tournament_id, db)
 
-        for i in range(num_matches):
-            db.add(TournamentMatch(
-                tournament_id=new_tournament.id,
-                player1_id=selected_players[i * 2],
-                player2_id=selected_players[i * 2 + 1],
-                round="1",
-                stage="knockout"
-            ))
-
-    await db.flush()
-    # ✅ Generate group matches
-    if tournament.num_groups > 0:
-        await generate_group_stage_matches(new_tournament.id, db)
-    else:
-        await generate_knockout_stage_matches(new_tournament, db)
-    tournament_id = new_tournament.id  # Access before commit
     await db.commit()
     return {"message": "Tournament created and matches generated", "tournament_id": tournament_id}
 
