@@ -7,7 +7,7 @@ from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsR
 from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.auth import is_admin
-from sqlalchemy.orm import selectinload
+from sqlalchemy import delete
 import random
 from sqlalchemy.orm import selectinload, aliased
 from typing import List
@@ -288,7 +288,7 @@ async def submit_tournament_match_result(
 
     # 🧼 Clear previous set scores (if any)
     await db.execute(
-        select(TournamentSetScore).where(TournamentSetScore.match_id == match_id).delete()
+        delete(TournamentSetScore).where(TournamentSetScore.match_id == match_id)
     )
 
     # ✅ Add new set scores
