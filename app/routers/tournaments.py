@@ -176,7 +176,6 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
 
         if match.stage == "group":
             group_matches.append(match_obj)
-
             group_player_set.add(match.player1_id)
             group_player_set.add(match.player2_id)
 
@@ -187,13 +186,80 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
                 "set_scores": " ".join(f"({s[0]}-{s[1]})" for s in match_obj.set_scores)
             }
             group_matrix["results"][key] = result
-
         elif match.stage == "knockout":
             knockout_matches.append(match_obj)
         else:
             individual_matches.append(match_obj)
 
     group_matrix["players"] = sorted(list(group_player_set))
+
+    # ➕ Ranking calculation
+    from collections import defaultdict
+
+    player_stats = defaultdict(lambda: {
+        "wins": 0,
+        "losses": 0,
+        "set_wins": 0,
+        "set_losses": 0,
+        "points_won": 0,
+        "points_lost": 0,
+    })
+
+    for match in group_matches:
+        if match.winner_id is None:
+            continue
+
+        p1, p2 = match.player1_id, match.player2_id
+        if match.winner_id == p1:
+            player_stats[p1]["wins"] += 1
+            player_stats[p2]["losses"] += 1
+        else:
+            player_stats[p2]["wins"] += 1
+            player_stats[p1]["losses"] += 1
+
+        for s in match.set_scores:
+            player_stats[p1]["set_wins"] += int(s[0] > s[1])
+            player_stats[p1]["set_losses"] += int(s[0] < s[1])
+            player_stats[p2]["set_wins"] += int(s[1] > s[0])
+            player_stats[p2]["set_losses"] += int(s[1] < s[0])
+            player_stats[p1]["points_won"] += s[0]
+            player_stats[p1]["points_lost"] += s[1]
+            player_stats[p2]["points_won"] += s[1]
+            player_stats[p2]["points_lost"] += s[0]
+
+    # Load group assignments
+    result = await db.execute(
+        select(TournamentPlayer).where(TournamentPlayer.tournament_id == tournament.id)
+    )
+    players_by_group = {}
+    for tp in result.scalars().all():
+        players_by_group.setdefault(tp.group_number, []).append(tp.player_id)
+
+    def sort_key(pid):
+        stats = player_stats[pid]
+        return (
+            -stats["wins"],
+            -stats["set_wins"] + stats["set_losses"],
+            -stats["points_won"] + stats["points_lost"]
+        )
+
+    group_rankings = {}
+    for group_num, pids in players_by_group.items():
+        ranked = sorted(pids, key=sort_key)
+
+        # Apply head-to-head override for direct ties
+        i = 0
+        while i < len(ranked) - 1:
+            a, b = ranked[i], ranked[i + 1]
+            if player_stats[a]["wins"] == player_stats[b]["wins"]:
+                h2h = group_matrix["results"].get(f"{a}-{b}") or group_matrix["results"].get(f"{b}-{a}")
+                if h2h and h2h["winner"] == b:
+                    ranked[i], ranked[i + 1] = ranked[i + 1], ranked[i]
+            i += 1
+
+        group_rankings[group_num] = ranked
+
+    group_matrix["rankings"] = group_rankings
 
     return TournamentDetailsResponse(
         id=tournament.id,
@@ -210,7 +276,6 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         final_standings=[],
         group_matrix=group_matrix
     )
-
 
 async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
     result = await db.execute(
