@@ -25,7 +25,6 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
         created_at=datetime.now(timezone.utc),
         num_players=len(tournament.player_ids)
     )
-
     db.add(new_tournament)
     await db.flush()  # Get tournament ID
 
@@ -34,6 +33,7 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
     if tournament.grouping_mode == GroupingMode.RANDOM:
         random.shuffle(players)
 
+    group_map = {}  # {group_number: [player_ids]}
     if tournament.num_groups > 0:
         for i, pid in enumerate(players):
             group_number = i % tournament.num_groups
@@ -42,6 +42,7 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
                 player_id=pid,
                 group_number=group_number
             ))
+            group_map.setdefault(group_number, []).append(pid)
     else:
         for pid in players:
             db.add(TournamentPlayer(
@@ -49,14 +50,42 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
                 player_id=pid,
                 group_number=None
             ))
-    tournament_id = new_tournament.id
-    await db.commit()
-    if tournament.num_groups > 0:
-        await generate_group_stage_matches(tournament_id, db)
-    else:
-        await generate_knockout_stage_matches(new_tournament, db)
 
-    return {"message": "Tournament created successfully", "tournament_id": tournament_id}
+    await db.flush()
+
+    # ✅ Generate matches
+    if tournament.num_groups > 0:
+        for group_number, group_players in group_map.items():
+            for i in range(len(group_players)):
+                for j in range(i + 1, len(group_players)):
+                    db.add(TournamentMatch(
+                        tournament_id=new_tournament.id,
+                        player1_id=group_players[i],
+                        player2_id=group_players[j],
+                        round="1",
+                        stage="group"
+                    ))
+    else:
+        # Straight to knockout — assume single elimination
+        num_matches = tournament.knockout_size // 2
+        selected_players = players[:tournament.knockout_size]
+        if tournament.grouping_mode == GroupingMode.RANDOM:
+            random.shuffle(selected_players)
+        else:
+            # assume sorted by elo rating later
+            pass
+
+        for i in range(num_matches):
+            db.add(TournamentMatch(
+                tournament_id=new_tournament.id,
+                player1_id=selected_players[i * 2],
+                player2_id=selected_players[i * 2 + 1],
+                round="1",
+                stage="knockout"
+            ))
+
+    await db.commit()
+    return {"message": "Tournament created and matches generated", "tournament_id": new_tournament.id}
 
 # ✅ Get all tournaments (public)
 from sqlalchemy.orm import selectinload
