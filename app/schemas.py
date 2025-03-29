@@ -101,3 +101,17 @@ class MatchInfo(BaseModel):
     winner_id: Optional[int]
     round: int
     stage: str
+
+class SetScore(BaseModel):
+    set_number: int
+    player1_score: int
+    player2_score: int
+
+class TournamentMatchResult(BaseModel):
+    player1_id: int
+    player2_id: int
+    winner_id: int
+    sets: List[SetScore]  # variable number of sets
+
+    class Config:
+        from_attributes = True

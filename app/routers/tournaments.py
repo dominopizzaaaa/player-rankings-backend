@@ -3,11 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
 from app.models import Tournament, GroupingMode, TournamentPlayer, TournamentMatch, Player
-from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse
+from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse, TournamentMatchResult, SetScore, MatchResult
 from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.auth import is_admin
-from app.schemas import MatchResult
+from sqlalchemy.orm import selectinload
 import random
 from sqlalchemy.orm import selectinload, aliased
 from typing import List
@@ -84,7 +84,6 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
     await db.commit()
     return {"message": "Tournament created and matches generated", "tournament_id": tournament_id}
 
-from sqlalchemy.orm import selectinload
 @router.get("/", response_model=List[TournamentResponse])
 async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -285,18 +284,33 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
     await db.commit()
 
 @router.post("/matches/{match_id}/result")
-async def submit_match_result(match_id: int, result: MatchResult, db: AsyncSession = Depends(get_db)):
-    match = await db.get(TournamentMatch, match_id)
-    if not match:
+async def submit_tournament_match_result(
+    match_id: int,
+    result: TournamentMatchResult,
+    db: AsyncSession = Depends(get_db)
+):
+    # ✅ Update the match scores
+    db_match = await db.get(TournamentMatch, match_id)
+    if not db_match:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    # Optional safety check (match.player1_id and player2_id must match)
-    if match.player1_id != result.player1_id or match.player2_id != result.player2_id:
-        raise HTTPException(status_code=400, detail="Player IDs do not match the match record.")
+    db_match.player1_id = result.player1_id
+    db_match.player2_id = result.player2_id
+    db_match.winner_id = result.winner_id
 
-    match.winner_id = result.winner_id
-    match.player1_score = result.player1_score
-    match.player2_score = result.player2_score
+    # 🧼 Clear previous set scores (if any)
+    await db.execute(
+        select(TournamentSetScore).where(TournamentSetScore.match_id == match_id).delete()
+    )
+
+    # ✅ Add new set scores
+    for set_score in result.sets:
+        db.add(TournamentSetScore(
+            match_id=match_id,
+            set_number=set_score.set_number,
+            player1_score=set_score.player1_score,
+            player2_score=set_score.player2_score,
+        ))
+
     await db.commit()
-
-    return {"message": "Match result submitted"}
+    return {"message": "Tournament match result recorded"}

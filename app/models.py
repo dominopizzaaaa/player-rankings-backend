@@ -75,3 +75,13 @@ class TournamentMatch(Base):
     winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)
     round = Column(String(50), nullable=False)  # e.g., "Group A", "Quarterfinal", "Final"
     stage = Column(String(20), nullable=False)  # "group" or "knockout"
+    set_scores = relationship("TournamentSetScore", back_populates="match", cascade="all, delete-orphan")
+
+class TournamentSetScore(Base):
+    __tablename__ = "tournament_set_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    match_id = Column(Integer, ForeignKey("tournament_matches.id", ondelete="CASCADE"))
+    set_number = Column(Integer)
+    player1_score = Column(Integer)
+    player2_score = Column(Integer)
