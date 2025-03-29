@@ -80,10 +80,10 @@ class TournamentMatch(Base):
 
 class TournamentSetScore(Base):
     __tablename__ = "tournament_set_scores"
-    match = relationship("TournamentMatch", back_populates="set_scores")
 
     id = Column(Integer, primary_key=True, index=True)
-    match_id = Column(Integer, ForeignKey("tournament_matches.id", ondelete="CASCADE"))
-    set_number = Column(Integer)
-    player1_score = Column(Integer)
-    player2_score = Column(Integer)
+    match_id = Column(Integer, ForeignKey("tournament_matches.id"))
+    player1_set_score = Column(Integer)
+    player2_set_score = Column(Integer)
+
+    match = relationship("TournamentMatch", back_populates="set_scores")
