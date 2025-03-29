@@ -2,7 +2,7 @@ from typing import Optional
 from pydantic import BaseModel
 from datetime import datetime
 from enum import Enum
-from typing import List
+from typing import List, Dict, Tuple
 from datetime import date as dt_date
 
 
@@ -74,6 +74,11 @@ class TournamentMatchResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class GroupMatrixEntry(BaseModel):
+    winner: int
+    score: str
+    set_scores: str
+
 class TournamentDetailsResponse(BaseModel):
     id: int
     name: str
@@ -87,6 +92,7 @@ class TournamentDetailsResponse(BaseModel):
     knockout_matches: List[TournamentMatchResponse]
     individual_matches: List[TournamentMatchResponse]
     final_standings: List[int]  # 1st to 4th place player_ids
+    group_matrix: Dict[str, GroupMatrixEntry]
 
     class Config:
         from_attributes = True

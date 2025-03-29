@@ -156,6 +156,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     group_matches = []
     knockout_matches = []
     individual_matches = []
+    group_matrix = {}
 
     for match in matches:
         match_obj = TournamentMatchResponse(
@@ -174,6 +175,18 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         
         if match.stage == "group":
             group_matches.append(match_obj)
+            # Update group matrix
+            key = tuple(sorted([match.player1_id, match.player2_id]))
+            winner = match.winner_id
+            score = f"{match.player1_score}-{match.player2_score}"
+            set_score = " ".join(f"({s[0]}-{s[1]})" for s in match_obj.set_scores)
+
+            group_matrix[key] = {
+                "winner": winner,
+                "score": score,
+                "set_scores": set_score
+
+            }
         elif match.stage == "knockout":
             knockout_matches.append(match_obj)
         else:
@@ -196,6 +209,8 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         knockout_matches=knockout_matches,
         individual_matches=individual_matches,
         final_standings=final_standings,
+        group_matrix=group_matrix
+
     )
 
 async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
