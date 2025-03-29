@@ -65,6 +65,7 @@ class TournamentPlayer(Base):
 # TournamentMatch model if not yet defined
 class TournamentMatch(Base):
     __tablename__ = "tournament_matches"
+    set_scores = relationship("TournamentSetScore", back_populates="match", cascade="all, delete-orphan")
 
     id = Column(Integer, primary_key=True, index=True)
     tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
@@ -79,6 +80,7 @@ class TournamentMatch(Base):
 
 class TournamentSetScore(Base):
     __tablename__ = "tournament_set_scores"
+    match = relationship("TournamentMatch", back_populates="set_scores")
 
     id = Column(Integer, primary_key=True, index=True)
     match_id = Column(Integer, ForeignKey("tournament_matches.id", ondelete="CASCADE"))
