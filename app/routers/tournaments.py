@@ -6,9 +6,10 @@ from app.models import Tournament, GroupingMode, TournamentPlayer, TournamentMat
 from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse, TournamentMatchResult
 from sqlalchemy.orm import selectinload, aliased
 from app.database import get_db
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from typing import List
 import random
+from collections import defaultdict
 
 router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
 
@@ -304,8 +305,9 @@ async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
     await db.commit()
 
 async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSession):
-    from collections import defaultdict
-    import random
+    print("🧠 Starting KO generation for", tournament.id)
+    print("Number of groups:", tournament.num_groups)
+    print("KO size:", tournament.knockout_size)
 
     KO_SIZE = tournament.knockout_size
     bracket = [None] * KO_SIZE
@@ -513,18 +515,43 @@ async def submit_tournament_match_result(
     result: TournamentMatchResult,
     db: AsyncSession = Depends(get_db)
 ):
-    db_match = await db.get(TournamentMatch, match_id)
-    if not db_match:
+    # Select tournament_id, stage, round without triggering lazy load
+    match_query = await db.execute(
+        select(
+            TournamentMatch.id,
+            TournamentMatch.tournament_id,
+            TournamentMatch.stage,
+            TournamentMatch.round,
+            TournamentMatch.player1_id,
+            TournamentMatch.player2_id
+        ).where(TournamentMatch.id == match_id)
+    )
+    match_info = match_query.first()
+
+    if not match_info:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    db_match.player1_id = result.player1_id
-    db_match.player2_id = result.player2_id
-    db_match.winner_id = result.winner_id
-    db_match.player1_score = result.player1_score
-    db_match.player2_score = result.player2_score
+    tournament_id = match_info.tournament_id
 
-    await db.execute(delete(TournamentSetScore).where(TournamentSetScore.match_id == match_id))
+    # Update match scores and winner
+    await db.execute(
+        update(TournamentMatch)
+        .where(TournamentMatch.id == match_id)
+        .values(
+            player1_id=result.player1_id,
+            player2_id=result.player2_id,
+            winner_id=result.winner_id,
+            player1_score=result.player1_score,
+            player2_score=result.player2_score
+        )
+    )
 
+    # Delete old set scores
+    await db.execute(
+        delete(TournamentSetScore).where(TournamentSetScore.match_id == match_id)
+    )
+
+    # Add new set scores
     for s in result.sets:
         db.add(TournamentSetScore(
             match_id=match_id,
@@ -534,27 +561,41 @@ async def submit_tournament_match_result(
         ))
 
     await db.commit()
+
     # Check if all group matches are done and KO hasn't started
     group_match_result = await db.execute(
         select(TournamentMatch)
-        .where(TournamentMatch.tournament_id == db_match.tournament_id)
+        .where(TournamentMatch.tournament_id == tournament_id)
         .where(TournamentMatch.stage == "group")
     )
     group_matches = group_match_result.scalars().all()
     all_group_complete = all(m.winner_id is not None for m in group_matches)
+    print("Checking if group matches are complete and knockout can start...")
+    print("Group matches found:", len(group_matches))
+    print("Matches with results:", sum(m.winner_id is not None for m in group_matches))
 
-    # Check if knockout matches exist
+    # Check if knockout matches already exist
     knockout_result = await db.execute(
         select(TournamentMatch)
-        .where(TournamentMatch.tournament_id == db_match.tournament_id)
+        .where(TournamentMatch.tournament_id == tournament_id)
         .where(TournamentMatch.stage == "knockout")
     )
     knockout_exists = len(knockout_result.scalars().all()) > 0
 
     if all_group_complete and not knockout_exists:
-        tournament = await db.get(Tournament, db_match.tournament_id)
+        tournament = await db.get(Tournament, tournament_id)
         print("✅ All group matches complete. Generating KO bracket.")
         await generate_knockout_stage_matches(tournament, db)
 
-    await advance_knockout_rounds(db_match.tournament_id, db)
+    await advance_knockout_rounds(tournament_id, db)
+
     return {"message": "Tournament match result recorded"}
+
+@router.post("/{tournament_id}/generate-ko")
+async def force_generate_ko(tournament_id: int, db: AsyncSession = Depends(get_db)):
+    tournament = await db.get(Tournament, tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    await generate_knockout_stage_matches(tournament, db)
+    return {"message": f"KO generated for tournament {tournament_id}"}
