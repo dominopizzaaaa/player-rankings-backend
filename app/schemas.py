@@ -91,7 +91,8 @@ class TournamentDetailsResponse(BaseModel):
     group_matches: List[TournamentMatchResponse]
     knockout_matches: List[TournamentMatchResponse]
     individual_matches: List[TournamentMatchResponse]
-    final_standings: List[int]  # 1st to 4th place player_ids
+    knockout_bracket: dict[str, list[TournamentMatchResponse]] = {}
+    final_standings: list[int] = []
     group_matrix: Optional[Dict[str, Any]] = None
 
     class Config:

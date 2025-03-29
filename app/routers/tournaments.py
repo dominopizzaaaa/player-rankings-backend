@@ -258,6 +258,9 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         group_rankings[group_num] = ranked
 
     group_matrix["rankings"] = group_rankings
+    bracket_by_round = defaultdict(list)
+    for match in knockout_matches:
+        bracket_by_round[match.round].append(match)
 
     return TournamentDetailsResponse(
         id=tournament.id,
@@ -272,7 +275,8 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         knockout_matches=knockout_matches,
         individual_matches=individual_matches,
         final_standings=[],
-        group_matrix=group_matrix
+        group_matrix=group_matrix,
+        knockout_bracket=dict(bracket_by_round)
     )
 
 async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
@@ -452,10 +456,35 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         return  # Still waiting on results
 
     # 5. Get winners
+    # 5. Get winners
     winners = [m.winner_id for m in last_round_matches if m.winner_id]
 
-    if len(winners) <= 1:
-        return  # Tournament complete or not enough players for another round
+    if len(winners) == 1:
+        # 🎯 Final is over – store standings
+        first_place = winners[0]
+        final_match = last_round_matches[0]
+        second_place = final_match.player1_id if final_match.winner_id != final_match.player1_id else final_match.player2_id
+
+        # ✅ Now get semi-final losers
+        semifinal_rounds = [r for r in rounds.keys() if r.startswith("Round of 4")]
+        third_fourth = []
+        if semifinal_rounds:
+            semi_matches = rounds[semifinal_rounds[0]]
+            for match in semi_matches:
+                if match.winner_id:
+                    loser = match.player1_id if match.winner_id != match.player1_id else match.player2_id
+                    third_fourth.append(loser)
+
+        # Save final standings somewhere...
+        # You can store it in Tournament.final_standings if you add a column
+        # For now, just print it:
+        print("Final Standings:")
+        print("1st:", first_place)
+        print("2nd:", second_place)
+        print("3rd/4th:", third_fourth)
+        
+        return
+
 
     # 6. Seed next round (pair winners in order)
     next_round_name = f"Round of {len(winners)}"
