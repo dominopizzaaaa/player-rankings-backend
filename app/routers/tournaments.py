@@ -553,6 +553,7 @@ async def submit_tournament_match_result(
 
     if all_group_complete and not knockout_exists:
         tournament = await db.get(Tournament, db_match.tournament_id)
+        print("✅ All group matches complete. Generating KO bracket.")
         await generate_knockout_stage_matches(tournament, db)
 
     await advance_knockout_rounds(db_match.tournament_id, db)
