@@ -534,5 +534,26 @@ async def submit_tournament_match_result(
         ))
 
     await db.commit()
+    # Check if all group matches are done and KO hasn't started
+    group_match_result = await db.execute(
+        select(TournamentMatch)
+        .where(TournamentMatch.tournament_id == db_match.tournament_id)
+        .where(TournamentMatch.stage == "group")
+    )
+    group_matches = group_match_result.scalars().all()
+    all_group_complete = all(m.winner_id is not None for m in group_matches)
+
+    # Check if knockout matches exist
+    knockout_result = await db.execute(
+        select(TournamentMatch)
+        .where(TournamentMatch.tournament_id == db_match.tournament_id)
+        .where(TournamentMatch.stage == "knockout")
+    )
+    knockout_exists = len(knockout_result.scalars().all()) > 0
+
+    if all_group_complete and not knockout_exists:
+        tournament = await db.get(Tournament, db_match.tournament_id)
+        await generate_knockout_stage_matches(tournament, db)
+
     await advance_knockout_rounds(db_match.tournament_id, db)
     return {"message": "Tournament match result recorded"}
