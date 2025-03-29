@@ -3,16 +3,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
 from app.models import Tournament, GroupingMode, TournamentPlayer, TournamentMatch, Player, TournamentSetScore
-from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse, TournamentMatchResult, SetScore, MatchResult
-from sqlalchemy.orm import selectinload
-from app.database import get_db
-from app.auth import is_admin
-from sqlalchemy import delete
-import random
+from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse, TournamentMatchResult
 from sqlalchemy.orm import selectinload, aliased
+from app.database import get_db
+from sqlalchemy import delete
 from typing import List
+import random
 
 router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
+
 
 @router.post("/", response_model=dict)
 async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Depends(get_db), admin=True):
@@ -33,7 +32,7 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
     if tournament.grouping_mode == GroupingMode.RANDOM:
         random.shuffle(players)
 
-    group_map = {}  # {group_number: [player_ids]}
+    group_map = {}
     if tournament.num_groups > 0:
         for i, pid in enumerate(players):
             group_number = i % tournament.num_groups
@@ -52,30 +51,29 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
             ))
 
     await db.flush()
-    tournament_id = new_tournament.id  # Store before commit
+    tournament_id = new_tournament.id
 
-    # ✅ Call generators using tournament_id only (no lazy loading)
     if tournament.num_groups > 0:
         await generate_group_stage_matches(tournament_id, db)
     else:
-        await generate_knockout_stage_matches(tournament_id, db)
+        await generate_knockout_stage_matches(new_tournament, db)
 
     await db.commit()
     return {"message": "Tournament created and matches generated", "tournament_id": tournament_id}
+
 
 @router.get("/", response_model=List[TournamentResponse])
 async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Tournament)
-        .options(selectinload(Tournament.players))  # ✅ Eager load
+        .options(selectinload(Tournament.players))
         .order_by(Tournament.date.desc())
     )
     tournaments = result.scalars().all()
 
-    # Manually map player_ids for the response
     response = []
     for t in tournaments:
-        player_ids = [tp.player_id for tp in t.players]  # ✅ Now safe to access
+        player_ids = [tp.player_id for tp in t.players]
         response.append(TournamentResponse(
             id=t.id,
             name=t.name,
@@ -89,6 +87,7 @@ async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
         ))
 
     return response
+
 
 @router.get("/{tournament_id}", response_model=TournamentResponse)
 async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db)):
@@ -110,15 +109,14 @@ async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db))
         player_ids=player_ids
     )
 
+
 @router.get("/{tournament_id}/details", response_model=TournamentDetailsResponse)
 async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(get_db)):
-    # 1. Get the tournament
     result = await db.execute(select(Tournament).where(Tournament.id == tournament_id))
     tournament = result.scalars().first()
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found.")
 
-    # 2. Get all matches for this tournament
     Player1 = aliased(Player)
     Player2 = aliased(Player)
 
@@ -143,7 +141,6 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     result = await db.execute(match_query)
     matches = result.all()
 
-    # 3. Fetch all set scores for these matches
     match_ids = [m.id for m in matches]
     score_results = await db.execute(
         select(TournamentSetScore).where(TournamentSetScore.match_id.in_(match_ids))
@@ -152,11 +149,15 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     for s in score_results.scalars().all():
         set_scores_by_match.setdefault(s.match_id, []).append([s.player1_score, s.player2_score])
 
-    # 4. Categorize matches
     group_matches = []
     knockout_matches = []
     individual_matches = []
-    group_matrix = {}
+
+    group_matrix = {
+        "players": [],
+        "results": {}
+    }
+    group_player_set = set()
 
     for match in matches:
         match_obj = TournamentMatchResponse(
@@ -172,30 +173,28 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
             stage=match.stage,
             set_scores=set_scores_by_match.get(match.id, [])
         )
-        
+
         if match.stage == "group":
             group_matches.append(match_obj)
-            # Update group matrix
-            key = tuple(sorted([match.player1_id, match.player2_id]))
-            winner = match.winner_id
-            score = f"{match.player1_score}-{match.player2_score}"
-            set_score = " ".join(f"({s[0]}-{s[1]})" for s in match_obj.set_scores)
 
-            group_matrix[key] = {
-                "winner": winner,
-                "score": score,
-                "set_scores": set_score
+            group_player_set.add(match.player1_id)
+            group_player_set.add(match.player2_id)
 
+            key = f"{match.player1_id}-{match.player2_id}"
+            result = {
+                "winner": match.winner_id,
+                "score": f"{match.player1_score}-{match.player2_score}",
+                "set_scores": " ".join(f"({s[0]}-{s[1]})" for s in match_obj.set_scores)
             }
+            group_matrix["results"][key] = result
+
         elif match.stage == "knockout":
             knockout_matches.append(match_obj)
         else:
             individual_matches.append(match_obj)
 
-    # 5. Final standings (placeholder for now)
-    final_standings = []
+    group_matrix["players"] = sorted(list(group_player_set))
 
-    # 6. Return response
     return TournamentDetailsResponse(
         id=tournament.id,
         name=tournament.name,
@@ -208,13 +207,12 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         group_matches=group_matches,
         knockout_matches=knockout_matches,
         individual_matches=individual_matches,
-        final_standings=final_standings,
+        final_standings=[],
         group_matrix=group_matrix
-
     )
 
+
 async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
-    # Get all tournament players grouped by group number
     result = await db.execute(
         select(TournamentPlayer)
         .where(TournamentPlayer.tournament_id == tournament_id)
@@ -224,67 +222,54 @@ async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
 
     groups = {}
     for player in players:
-        if player.group_number not in groups:
-            groups[player.group_number] = []
-        groups[player.group_number].append(player.player_id)
+        groups.setdefault(player.group_number, []).append(player.player_id)
 
-    # Generate round-robin matches for each group
-    match_sequence = 1
     for group_number, player_ids in groups.items():
-        n = len(player_ids)
-        for i in range(n):
-            for j in range(i + 1, n):
-                match = TournamentMatch(
+        for i in range(len(player_ids)):
+            for j in range(i + 1, len(player_ids)):
+                db.add(TournamentMatch(
                     tournament_id=tournament_id,
                     player1_id=player_ids[i],
                     player2_id=player_ids[j],
                     round=f"Group {group_number + 1}",
                     stage="group"
-                )
-                db.add(match)
-                match_sequence += 1
+                ))
     await db.commit()
+
 
 async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSession):
     result = await db.execute(
-        select(TournamentPlayer.player_id, TournamentPlayer.group_number, TournamentPlayer.seed)
+        select(TournamentPlayer.player_id)
         .where(TournamentPlayer.tournament_id == tournament.id)
     )
-    tournament_players = result.all()
-    player_ids = [tp[0] for tp in tournament_players]
-
-    # Fetch Elo ratings for players
-    from app.models import Player  # 🔄 Add this import at the top if not already there
+    player_ids = [r[0] for r in result.all()]
 
     elo_result = await db.execute(
         select(Player.id, Player.rating).where(Player.id.in_(player_ids))
     )
-    ratings = elo_result.all()
-    player_ratings = {player_id: rating for player_id, rating in ratings}
+    ratings = dict(elo_result.all())
 
     if tournament.grouping_mode == GroupingMode.RANKED:
-        sorted_players = sorted(player_ids, key=lambda pid: -player_ratings.get(pid, 0))
+        sorted_players = sorted(player_ids, key=lambda pid: -ratings.get(pid, 0))
     else:
         sorted_players = player_ids[:]
         random.shuffle(sorted_players)
 
     knockout_participants = sorted_players[:tournament.knockout_size]
 
-    match_sequence = 1
     for i in range(0, len(knockout_participants), 2):
         if i + 1 >= len(knockout_participants):
-            break  # Skip if odd player count
-        match = TournamentMatch(
+            break
+        db.add(TournamentMatch(
             tournament_id=tournament.id,
             player1_id=knockout_participants[i],
             player2_id=knockout_participants[i + 1],
-            round="Round of {}".format(len(knockout_participants)),
+            round=f"Round of {len(knockout_participants)}",
             stage="knockout"
-        )
-        db.add(match)
-        match_sequence += 1
+        ))
 
     await db.commit()
+
 
 @router.post("/matches/{match_id}/result")
 async def submit_tournament_match_result(
@@ -292,7 +277,6 @@ async def submit_tournament_match_result(
     result: TournamentMatchResult,
     db: AsyncSession = Depends(get_db)
 ):
-    # ✅ Update the match scores
     db_match = await db.get(TournamentMatch, match_id)
     if not db_match:
         raise HTTPException(status_code=404, detail="Match not found")
@@ -300,19 +284,17 @@ async def submit_tournament_match_result(
     db_match.player1_id = result.player1_id
     db_match.player2_id = result.player2_id
     db_match.winner_id = result.winner_id
+    db_match.player1_score = result.player1_score
+    db_match.player2_score = result.player2_score
 
-    # 🧼 Clear previous set scores (if any)
-    await db.execute(
-        delete(TournamentSetScore).where(TournamentSetScore.match_id == match_id)
-    )
+    await db.execute(delete(TournamentSetScore).where(TournamentSetScore.match_id == match_id))
 
-    # ✅ Add new set scores
-    for set_score in result.sets:
+    for s in result.sets:
         db.add(TournamentSetScore(
             match_id=match_id,
-            set_number=set_score.set_number,
-            player1_score=set_score.player1_score,
-            player2_score=set_score.player2_score,
+            set_number=s.set_number,
+            player1_score=s.player1_score,
+            player2_score=s.player2_score
         ))
 
     await db.commit()
