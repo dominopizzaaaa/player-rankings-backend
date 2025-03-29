@@ -88,7 +88,6 @@ async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
 
     return response
 
-
 @router.get("/{tournament_id}", response_model=TournamentResponse)
 async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Tournament).where(Tournament.id == tournament_id))
@@ -108,7 +107,6 @@ async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db))
         created_at=tournament.created_at,
         player_ids=player_ids
     )
-
 
 @router.get("/{tournament_id}/details", response_model=TournamentDetailsResponse)
 async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(get_db)):
@@ -301,40 +299,67 @@ async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
                 ))
     await db.commit()
 
-
 async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSession):
+    # 1. Get all players from the tournament
     result = await db.execute(
         select(TournamentPlayer.player_id)
         .where(TournamentPlayer.tournament_id == tournament.id)
     )
     player_ids = [r[0] for r in result.all()]
 
+    # 2. Get Elo ratings
     elo_result = await db.execute(
         select(Player.id, Player.rating).where(Player.id.in_(player_ids))
     )
     ratings = dict(elo_result.all())
 
-    if tournament.grouping_mode == GroupingMode.RANKED:
-        sorted_players = sorted(player_ids, key=lambda pid: -ratings.get(pid, 0))
-    else:
-        sorted_players = player_ids[:]
-        random.shuffle(sorted_players)
+    # 3. Sort players by Elo rating descending
+    sorted_players = sorted(player_ids, key=lambda pid: -ratings.get(pid, 0))
 
-    knockout_participants = sorted_players[:tournament.knockout_size]
+    # 4. Seed top 2
+    top_seed = sorted_players[0] if len(sorted_players) >= 1 else None
+    second_seed = sorted_players[1] if len(sorted_players) >= 2 else None
+    remaining_players = sorted_players[2:]
 
-    for i in range(0, len(knockout_participants), 2):
-        if i + 1 >= len(knockout_participants):
-            break
-        db.add(TournamentMatch(
+    # 5. Determine knockout size
+    KO_SIZE = tournament.knockout_size
+    bracket = [None] * KO_SIZE
+
+    if top_seed:
+        bracket[0] = top_seed
+    if second_seed:
+        bracket[-1] = second_seed
+
+    import random
+    random.shuffle(remaining_players)
+
+    # 6. Fill remaining slots
+    i = 1
+    for pid in remaining_players:
+        while bracket[i] is not None:
+            i += 1
+        bracket[i] = pid
+        i += 1
+
+    # 7. If not enough players, remaining slots are None (free pass)
+    matches = []
+    for i in range(0, KO_SIZE, 2):
+        p1 = bracket[i]
+        p2 = bracket[i + 1] if i + 1 < KO_SIZE else None
+
+        if p1 is None or p2 is None:
+            continue  # Skip incomplete pairings for now (can mark as auto-win if needed)
+
+        matches.append(TournamentMatch(
             tournament_id=tournament.id,
-            player1_id=knockout_participants[i],
-            player2_id=knockout_participants[i + 1],
-            round=f"Round of {len(knockout_participants)}",
+            player1_id=p1,
+            player2_id=p2,
+            round=f"Round of {KO_SIZE}",
             stage="knockout"
         ))
 
+    db.add_all(matches)
     await db.commit()
-
 
 @router.post("/matches/{match_id}/result")
 async def submit_tournament_match_result(
