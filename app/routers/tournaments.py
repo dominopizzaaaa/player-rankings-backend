@@ -11,7 +11,7 @@ from sqlalchemy import delete, update, or_
 from typing import List
 import random
 from collections import defaultdict
-from itertools import permutations
+from math import ceil, log2
 
 router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
 
@@ -89,6 +89,7 @@ async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
             num_players=t.num_players,
             num_groups=t.num_groups,
             knockout_size=t.knockout_size,
+            players_advance_per_group=t.players_advance_per_group,
             created_at=t.created_at,
             player_ids=player_ids
         ))
@@ -310,10 +311,8 @@ async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
                 ))
     await db.commit()
 
-async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSession):
+async def generate_knockout_stage_matches(tournament: Tournament, db):
     print("🧠 Starting KO generation for", tournament.id)
-
-    from math import ceil, log2
 
     group_assignments = {}
     players_advancing = []
@@ -368,25 +367,32 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
     # 🧠 Compute KO bracket size
     ko_size = 2 ** ceil(log2(len(players_advancing)))
     bracket = [None] * ko_size
-
     print(f"🔢 {len(players_advancing)} players advancing → KO size: {ko_size}")
 
-    # 🎯 Seed top 2
-    if players_advancing:
-        bracket[0] = players_advancing[0]
-    if len(players_advancing) > 1:
-        bracket[-1] = players_advancing[1]
+    # ✅ Spread top seeds across bracket to avoid early clashes
+    def spread_seeds(player_ids):
+        slot_indices = list(range(0, ko_size, 2))  # even indices
+        bracket_temp = [None] * ko_size
+        for idx, pid in enumerate(player_ids):
+            if idx < len(slot_indices):
+                bracket_temp[slot_indices[idx]] = pid
+            else:
+                # fallback in case we run out of slots
+                for i in range(ko_size):
+                    if bracket_temp[i] is None:
+                        bracket_temp[i] = pid
+                        break
+        return bracket_temp
 
-    seeded_ids = set(filter(None, [bracket[0], bracket[-1]]))
+    bracket = spread_seeds(players_advancing[:tournament.players_advance_per_group])
+
+    seeded_ids = set(filter(None, bracket))
     remaining = [pid for pid in players_advancing if pid not in seeded_ids]
-
     random.shuffle(remaining)
-    i = 0
-    for pid in remaining:
-        while i < ko_size and bracket[i] is not None:
-            i += 1
-        if i < ko_size:
-            bracket[i] = pid
+
+    for i in range(ko_size):
+        if bracket[i] is None and remaining:
+            bracket[i] = remaining.pop(0)
 
     # 🧾 Create matches
     for i in range(0, ko_size, 2):
