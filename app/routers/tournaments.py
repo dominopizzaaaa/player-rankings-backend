@@ -6,7 +6,7 @@ from app.models import Tournament, GroupingMode, TournamentPlayer, TournamentMat
 from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse, TournamentMatchResult
 from sqlalchemy.orm import selectinload, aliased
 from app.database import get_db
-from sqlalchemy import delete, update
+from sqlalchemy import delete, update, or_
 from typing import List
 import random
 from collections import defaultdict
@@ -136,7 +136,14 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         )
         .join(Player1, TournamentMatch.player1_id == Player1.id)
         .join(Player2, TournamentMatch.player2_id == Player2.id)
-        .where(TournamentMatch.tournament_id == tournament_id)
+        .where(
+            TournamentMatch.tournament_id == tournament_id,
+            or_(
+                TournamentMatch.stage != "knockout",  # Include group/individual matches as-is
+                TournamentMatch.round.like("Round of%"),
+                TournamentMatch.round == "3rd Place Match"
+            )
+        )
     )
     result = await db.execute(match_query)
     matches = result.all()
@@ -455,6 +462,11 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
     await db.commit()
 
 async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
+    tournament = await db.get(Tournament, tournament_id)
+    if tournament.final_standings:
+        print("🏁 Tournament is already complete.")
+        return  # Stop if standings already exist
+
     # 1. Get all knockout matches, ordered by round name
     result = await db.execute(
         select(TournamentMatch)
