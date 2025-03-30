@@ -141,7 +141,6 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
             TournamentMatch.tournament_id == tournament_id,
             or_(
                 TournamentMatch.stage != "knockout",
-                TournamentMatch.round.like("Round of%"),
                 TournamentMatch.round == "3rd Place Match"
             )
         )
