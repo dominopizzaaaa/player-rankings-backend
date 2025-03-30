@@ -14,7 +14,6 @@ from itertools import permutations
 
 router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
 
-
 @router.post("/", response_model=dict)
 async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Depends(get_db), admin=True):
     new_tournament = Tournament(
@@ -62,7 +61,6 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
 
     await db.commit()
     return {"message": "Tournament created and matches generated", "tournament_id": tournament_id}
-
 
 @router.get("/", response_model=List[TournamentResponse])
 async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
@@ -137,8 +135,8 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
             TournamentMatch.round,
             TournamentMatch.stage,
         )
-        .join(Player1, TournamentMatch.player1_id == Player1.id)
-        .join(Player2, TournamentMatch.player2_id == Player2.id)
+        .outerjoin(Player1, TournamentMatch.player1_id == Player1.id)
+        .outerjoin(Player2, TournamentMatch.player2_id == Player2.id)
         .where(
             TournamentMatch.tournament_id == tournament_id,
             or_(
