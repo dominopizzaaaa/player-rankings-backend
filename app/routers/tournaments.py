@@ -499,7 +499,6 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     winners = [m.winner_id for m in last_round_matches if m.winner_id]
 
     if len(winners) == 1:
-        tournament = await db.get(Tournament, tournament_id)
         final_match = last_round_matches[0]
         first = winners[0]
         second = final_match.player1_id if final_match.winner_id != final_match.player1_id else final_match.player2_id
