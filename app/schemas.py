@@ -59,9 +59,9 @@ class TournamentResponse(BaseModel):
 class TournamentMatchResponse(BaseModel):
     id: int
     player1_id: int
-    player2_id: int
+    player2_id: Optional[int]
     player1_name: str
-    player2_name: str
+    player2_name: Optional[str]
     player1_score: Optional[int]
     player2_score: Optional[int]
     winner_id: Optional[int]

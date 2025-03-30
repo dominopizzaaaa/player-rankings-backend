@@ -25,3 +25,5 @@ async def get_db():
     async with SessionLocal() as session:
         yield session
         
+
+async_session = SessionLocal

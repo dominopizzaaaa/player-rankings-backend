@@ -56,7 +56,7 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
             db.add(TournamentPlayer(
                 tournament_id=new_tournament.id,
                 player_id=pid,
-                group_number=None
+                group_number=0  # ✅ Use 0 to mean "no group"
             ))
 
     await db.flush()
@@ -314,7 +314,6 @@ async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
 async def generate_knockout_stage_matches(tournament: Tournament, db):
     print("🧠 Starting KO generation for", tournament.id)
 
-    group_assignments = {}
     players_advancing = []
 
     if tournament.num_groups == 0:
@@ -340,7 +339,6 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
         group_map = defaultdict(list)
         for p in players:
             group_map[p.group_number].append(p.player_id)
-            group_assignments[p.player_id] = p.group_number
 
         result = await db.execute(
             select(TournamentMatch)
@@ -364,42 +362,39 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
             top_n = ranked[:tournament.players_advance_per_group]
             players_advancing.extend(top_n)
 
-    # 🧠 Compute KO bracket size
-    ko_size = 2 ** ceil(log2(len(players_advancing)))
-    bracket = [None] * ko_size
-    print(f"🔢 {len(players_advancing)} players advancing → KO size: {ko_size}")
+    num_players = len(players_advancing)
+    ko_size = 2 ** ceil(log2(num_players))
+    num_matches = ko_size // 2
+    num_byes = ko_size - num_players
 
-    # ✅ Spread top seeds across bracket to avoid early clashes
-    def spread_seeds(player_ids):
-        slot_indices = list(range(0, ko_size, 2))  # even indices
-        bracket_temp = [None] * ko_size
-        for idx, pid in enumerate(player_ids):
-            if idx < len(slot_indices):
-                bracket_temp[slot_indices[idx]] = pid
-            else:
-                # fallback in case we run out of slots
-                for i in range(ko_size):
-                    if bracket_temp[i] is None:
-                        bracket_temp[i] = pid
-                        break
-        return bracket_temp
+    print(f"🔢 {num_players} players advancing → KO size: {ko_size}, byes: {num_byes}")
 
-    bracket = spread_seeds(players_advancing[:tournament.players_advance_per_group])
+    # ✅ Seed top players to get byes
+    seeded = players_advancing[:num_byes]
+    rest = players_advancing[num_byes:]
+    random.shuffle(rest)
 
-    seeded_ids = set(filter(None, bracket))
-    remaining = [pid for pid in players_advancing if pid not in seeded_ids]
-    random.shuffle(remaining)
+    matches = []
 
-    for i in range(ko_size):
-        if bracket[i] is None and remaining:
-            bracket[i] = remaining.pop(0)
+    # Give free pass to top players
+    for pid in seeded:
+        db.add(TournamentMatch(
+            tournament_id=tournament.id,
+            player1_id=pid,
+            player2_id=None,
+            winner_id=pid,
+            player1_score=1,
+            player2_score=0,
+            round=f"Round of {ko_size}",
+            stage="knockout"
+        ))
 
-    # 🧾 Create matches
-    for i in range(0, ko_size, 2):
-        p1 = bracket[i]
-        p2 = bracket[i + 1] if i + 1 < ko_size else None
-
-        if p1 and not p2:
+    # Pair the remaining players
+    for i in range(0, len(rest), 2):
+        p1 = rest[i]
+        p2 = rest[i + 1] if i + 1 < len(rest) else None
+        if p2 is None:
+            # Odd one out gets a bye
             db.add(TournamentMatch(
                 tournament_id=tournament.id,
                 player1_id=p1,
@@ -410,7 +405,7 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
                 round=f"Round of {ko_size}",
                 stage="knockout"
             ))
-        elif p1 and p2:
+        else:
             db.add(TournamentMatch(
                 tournament_id=tournament.id,
                 player1_id=p1,
@@ -502,14 +497,13 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     # 4. Get winners of current round
     winners = [m.winner_id for m in last_round_matches if m.winner_id]
 
-    # 5. If only one winner left, tournament is complete
-    if len(winners) == 1 and (last_round_name == "Final" or last_round_name == "Round of 2"):
+    # 5. If only one winner left, finalize tournament
+    if len(winners) == 1:
         final_match = last_round_matches[0]
         first = winners[0]
         second = final_match.player1_id if final_match.winner_id != final_match.player1_id else final_match.player2_id
 
-        # Check 3rd place result (if available)
-        third, fourth = None, None
+        # Check if 3rd place match exists and is complete
         third_place_result = await db.execute(
             select(
                 TournamentMatch.player1_id,
@@ -521,11 +515,18 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
             )
         )
         third_match = third_place_result.first()
-        if third_match and third_match.winner_id:
-            third = third_match.winner_id
-            fourth = third_match.player1_id if third_match.winner_id != third_match.player1_id else third_match.player2_id
 
-        # ✅ Save final standings to new table
+        # Don't finalize yet if 3rd/4th match exists but is not completed
+        if third_match and third_match.winner_id is None:
+            print("⏳ Waiting for 3rd place match to finish before saving final standings.")
+            return
+
+        third = third_match.winner_id if third_match else None
+        fourth = (
+            third_match.player1_id if third_match and third_match.winner_id != third_match.player1_id
+            else third_match.player2_id if third_match else None
+        )
+
         db.add_all([
             TournamentStanding(tournament_id=tournament_id, player_id=first, position=1),
             TournamentStanding(tournament_id=tournament_id, player_id=second, position=2)
@@ -540,7 +541,7 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         return
 
     # 6. Seed next round (pair winners in order)
-    next_round_name = f"Round of {len(winners)}"
+    next_round_name = "Final" if len(winners) == 2 else f"Round of {len(winners)}"
 
     # 🔒 Avoid duplicate next round
     existing_next_round = await db.execute(

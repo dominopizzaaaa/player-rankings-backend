@@ -38,5 +38,13 @@ async def drop_and_recreate_tournament_tables():
         ])
         print("✅ Tables recreated.")
 
+        print("🔢 Resetting AUTO_INCREMENT values...")
+        await conn.execute(text("ALTER TABLE tournaments AUTO_INCREMENT = 1"))
+        await conn.execute(text("ALTER TABLE tournament_players AUTO_INCREMENT = 1"))
+        await conn.execute(text("ALTER TABLE tournament_matches AUTO_INCREMENT = 1"))
+        await conn.execute(text("ALTER TABLE tournament_set_scores AUTO_INCREMENT = 1"))
+        await conn.execute(text("ALTER TABLE tournament_standings AUTO_INCREMENT = 1"))
+        print("✅ AUTO_INCREMENT reset.")
+
 if __name__ == "__main__":
     asyncio.run(drop_and_recreate_tournament_tables())

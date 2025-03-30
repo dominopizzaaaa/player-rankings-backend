@@ -74,7 +74,7 @@ class TournamentMatch(Base):
     id = Column(Integer, primary_key=True, index=True)
     tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
     player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    player2_id = Column(Integer, ForeignKey("players.id"), nullable=True)
     player1_score = Column(Integer, nullable=True)
     player2_score = Column(Integer, nullable=True)
     winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)
