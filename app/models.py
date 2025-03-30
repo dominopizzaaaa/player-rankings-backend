@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from .database import Base
 import enum
 from datetime import datetime, timezone
+from sqlalchemy.dialects.mysql import JSON
 
 class Player(Base):
     __tablename__ = "players"
@@ -48,8 +49,8 @@ class Tournament(Base):
     knockout_size = Column(Integer, nullable=False)
     grouping_mode = Column(Enum(GroupingMode), nullable=False)
     created_at = Column(Date, nullable=False)
+    final_standings = Column(JSON, nullable=True)
     players = relationship("TournamentPlayer", back_populates="tournament", cascade="all, delete-orphan")
-
 
 class TournamentPlayer(Base):
     __tablename__ = "tournament_players"
@@ -61,8 +62,6 @@ class TournamentPlayer(Base):
     seed = Column(Integer, nullable=True)  # based on Elo
     tournament = relationship("Tournament", back_populates="players")
 
-
-# TournamentMatch model if not yet defined
 class TournamentMatch(Base):
     __tablename__ = "tournament_matches"
     set_scores = relationship("TournamentSetScore", back_populates="match", cascade="all, delete-orphan")

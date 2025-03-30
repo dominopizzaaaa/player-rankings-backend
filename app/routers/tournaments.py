@@ -482,7 +482,6 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         return  # Still waiting on results
 
     # 5. Get winners
-    # 5. Get winners
     winners = [m.winner_id for m in last_round_matches if m.winner_id]
 
     if len(winners) == 1:
@@ -501,16 +500,17 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
                     loser = match.player1_id if match.winner_id != match.player1_id else match.player2_id
                     third_fourth.append(loser)
 
-        # Save final standings somewhere...
-        # You can store it in Tournament.final_standings if you add a column
-        # For now, just print it:
-        print("Final Standings:")
-        print("1st:", first_place)
-        print("2nd:", second_place)
-        print("3rd/4th:", third_fourth)
-        
-        return
+        tournament = await db.get(Tournament, tournament_id)
+        tournament.final_standings = {
+            "1st": first_place,
+            "2nd": second_place,
+            "3rd/4th": third_fourth
+        }
+        db.add(tournament)
+        await db.commit()
 
+        print("✅ Final standings saved to tournament.")
+        return
 
     # 6. Seed next round (pair winners in order)
     next_round_name = f"Round of {len(winners)}"
