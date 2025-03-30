@@ -459,14 +459,21 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         print("🏁 Tournament is already complete.")
         return  # Stop if standings already exist
 
-    # 1. Get all knockout matches, ordered by round name
+    # 1. Get all knockout matches
     result = await db.execute(
-        select(TournamentMatch)
-        .where(TournamentMatch.tournament_id == tournament_id)
-        .where(TournamentMatch.stage == "knockout")
-        .order_by(TournamentMatch.round)
+        select(
+            TournamentMatch.id,
+            TournamentMatch.player1_id,
+            TournamentMatch.player2_id,
+            TournamentMatch.winner_id,
+            TournamentMatch.round,
+            TournamentMatch.stage
+        ).where(
+            TournamentMatch.tournament_id == tournament_id,
+            TournamentMatch.stage == "knockout"
+        ).order_by(TournamentMatch.round)
     )
-    matches = result.scalars().all()
+    matches = result.all()
 
     if not matches:
         return  # No knockout matches to process
@@ -507,39 +514,46 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
             ))
             await db.commit()
             print("🎖️ 3rd Place Match created")
-            # Continue to generate final round
 
     # 4. Get winners of current round
     winners = [m.winner_id for m in last_round_matches if m.winner_id]
 
-    # 5. If only one winner left, we're at the end
+    # 5. If only one winner left, tournament is complete
     if len(winners) == 1:
         final_match = last_round_matches[0]
         first = winners[0]
         second = final_match.player1_id if final_match.winner_id != final_match.player1_id else final_match.player2_id
 
-        # Fetch result of 3rd Place Match, if it exists
+        # Check 3rd place result (if available)
         third, fourth = None, None
-        third_place_match = await db.execute(
-            select(TournamentMatch).where(
+        third_place_result = await db.execute(
+            select(
+                TournamentMatch.player1_id,
+                TournamentMatch.player2_id,
+                TournamentMatch.winner_id
+            ).where(
                 TournamentMatch.tournament_id == tournament_id,
                 TournamentMatch.round == "3rd Place Match"
             )
         )
-        third_match = third_place_match.scalars().first()
+        third_match = third_place_result.first()
         if third_match and third_match.winner_id:
             third = third_match.winner_id
             fourth = third_match.player1_id if third_match.winner_id != third_match.player1_id else third_match.player2_id
 
-        # Store final standings
-        tournament.final_standings = {
+        # ✅ Store final standings
+        final_standings = {
             "1st": first,
             "2nd": second,
-            "3rd": third,
-            "4th": fourth
         }
+        if third:
+            final_standings["3rd"] = third
+        if fourth:
+            final_standings["4th"] = fourth
+
+        tournament.final_standings = final_standings
         await db.commit()
-        print("✅ Final Standings:", tournament.final_standings)
+        print("✅ Final Standings:", final_standings)
         return
 
     # 6. Seed next round (pair winners in order)
@@ -547,16 +561,17 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
 
     # 🔒 Avoid duplicate next round
     existing_next_round = await db.execute(
-        select(TournamentMatch)
-        .where(TournamentMatch.tournament_id == tournament_id)
-        .where(TournamentMatch.round == next_round_name)
-        .where(TournamentMatch.stage == "knockout")
+        select(TournamentMatch).where(
+            TournamentMatch.tournament_id == tournament_id,
+            TournamentMatch.round == next_round_name,
+            TournamentMatch.stage == "knockout"
+        )
     )
     if existing_next_round.scalars().first():
         print(f"⚠️ Round {next_round_name} already exists. Skipping regeneration.")
         return
 
-    # 7. Create matches for next round
+    # 7. Create next-round matches
     for i in range(0, len(winners), 2):
         p1 = winners[i]
         p2 = winners[i + 1] if i + 1 < len(winners) else None
@@ -574,7 +589,7 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         db.add(match)
 
     await db.commit()
-
+    
 @router.post("/matches/{match_id}/result")
 async def submit_tournament_match_result(
     match_id: int,
