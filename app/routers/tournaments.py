@@ -551,6 +551,17 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     # 6. Seed next round (pair winners in order)
     next_round_name = f"Round of {len(winners)}"
 
+    # 🔒 Avoid re-adding same round if it already exists
+    existing_next_round = await db.execute(
+        select(TournamentMatch)
+        .where(TournamentMatch.tournament_id == tournament_id)
+        .where(TournamentMatch.round == next_round_name)
+        .where(TournamentMatch.stage == "knockout")
+    )
+    if existing_next_round.scalars().first():
+        print(f"⚠️ Round {next_round_name} already exists. Skipping regeneration.")
+        return
+
     for i in range(0, len(winners), 2):
         p1 = winners[i]
         p2 = winners[i + 1] if i + 1 < len(winners) else None
