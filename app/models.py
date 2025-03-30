@@ -1,9 +1,7 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Date, Boolean, Enum
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Date
 from sqlalchemy.orm import relationship
 from .database import Base
-import enum
 from datetime import datetime, timezone
-from sqlalchemy.dialects.mysql import JSON
 
 class Player(Base):
     __tablename__ = "players"
@@ -34,10 +32,6 @@ class Match(Base):
     player2 = relationship("Player", foreign_keys=[player2_id])
     match_winner = relationship("Player", foreign_keys=[winner_id])
 
-class GroupingMode(enum.Enum):
-    RANKED = "ranked"
-    RANDOM = "random"
-
 class Tournament(Base):
     __tablename__ = "tournaments"
 
@@ -47,7 +41,6 @@ class Tournament(Base):
     num_players = Column(Integer, nullable=False)
     num_groups = Column(Integer, nullable=False)
     knockout_size = Column(Integer, nullable=False)
-    grouping_mode = Column(Enum(GroupingMode), nullable=False)
     created_at = Column(Date, nullable=False)
     standings = relationship("TournamentStanding", back_populates="tournament", cascade="all, delete-orphan")
     players = relationship("TournamentPlayer", back_populates="tournament", cascade="all, delete-orphan")

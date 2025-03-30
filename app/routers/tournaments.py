@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
-from app.models import Tournament, GroupingMode, TournamentPlayer, TournamentMatch, Player, TournamentSetScore, TournamentStanding
+from app.models import Tournament, TournamentPlayer, TournamentMatch, Player, TournamentSetScore, TournamentStanding
 from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse, TournamentMatchResult
 from sqlalchemy.orm import selectinload, aliased
 from sqlalchemy.orm.attributes import flag_modified
@@ -22,7 +22,6 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
         date=tournament.date,
         num_groups=tournament.num_groups,
         knockout_size=tournament.knockout_size,
-        grouping_mode=tournament.grouping_mode,
         created_at=datetime.now(timezone.utc),
         num_players=len(tournament.player_ids)
     )
@@ -30,9 +29,6 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
     await db.flush()  # Assigns new_tournament.id
 
     players = tournament.player_ids[:]
-
-    if tournament.grouping_mode == GroupingMode.RANDOM:
-        random.shuffle(players)
 
     group_map = {}
     if tournament.num_groups > 0:
@@ -82,7 +78,6 @@ async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
             num_players=t.num_players,
             num_groups=t.num_groups,
             knockout_size=t.knockout_size,
-            grouping_mode=t.grouping_mode,
             created_at=t.created_at,
             player_ids=player_ids
         ))
@@ -104,7 +99,6 @@ async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db))
         num_players=tournament.num_players,
         num_groups=tournament.num_groups,
         knockout_size=tournament.knockout_size,
-        grouping_mode=tournament.grouping_mode,
         created_at=tournament.created_at,
         player_ids=player_ids
     )
@@ -272,7 +266,6 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         num_players=tournament.num_players,
         num_groups=tournament.num_groups,
         knockout_size=tournament.knockout_size,
-        grouping_mode=tournament.grouping_mode,
         created_at=tournament.created_at,
         group_matches=group_matches,
         knockout_matches=knockout_matches,
@@ -537,7 +530,7 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     winners = [m.winner_id for m in last_round_matches if m.winner_id]
 
     # 5. If only one winner left, tournament is complete
-    if len(winners) == 1:
+    if len(winners) == 1 and (last_round_name == "Final" or last_round_name == "Round of 2"):
         final_match = last_round_matches[0]
         first = winners[0]
         second = final_match.player1_id if final_match.winner_id != final_match.player1_id else final_match.player2_id

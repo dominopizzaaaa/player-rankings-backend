@@ -2,9 +2,8 @@ from typing import Optional
 from pydantic import BaseModel
 from datetime import datetime
 from enum import Enum
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Any
 from datetime import date as dt_date
-
 
 class PlayerCreate(BaseModel):
     name: str
@@ -41,7 +40,6 @@ class TournamentCreate(BaseModel):
     date: dt_date
     num_groups: int
     knockout_size: int
-    grouping_mode: GroupingMode
     player_ids: List[int]  # ✅ New field
 
 class TournamentResponse(BaseModel):
@@ -51,7 +49,6 @@ class TournamentResponse(BaseModel):
     num_players: int
     num_groups: int
     knockout_size: int
-    grouping_mode: GroupingMode
     created_at: dt_date
     player_ids: List[int]  # ✅ Required in response
 
@@ -86,7 +83,6 @@ class TournamentDetailsResponse(BaseModel):
     num_players: int
     num_groups: int
     knockout_size: int
-    grouping_mode: GroupingMode
     created_at: datetime
     group_matches: List[TournamentMatchResponse]
     knockout_matches: List[TournamentMatchResponse]
