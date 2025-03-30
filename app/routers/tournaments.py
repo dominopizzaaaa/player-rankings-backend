@@ -139,10 +139,6 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         .outerjoin(Player2, TournamentMatch.player2_id == Player2.id)
         .where(
             TournamentMatch.tournament_id == tournament_id,
-            or_(
-                TournamentMatch.stage != "knockout",
-                TournamentMatch.round == "3rd Place Match"
-            )
         )
     )
     result = await db.execute(match_query)
@@ -196,7 +192,8 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
 
         elif match.stage == "knockout":
             knockout_matches.append(match_obj)
-            bracket_by_round[match.round].append(match_obj)  # ✅ add all KO matches, including 3rd Place
+            round_label = match.round if match.round != "3rd Place Match" else "Round of 2"
+            bracket_by_round[round_label].append(match_obj)
 
         else:
             individual_matches.append(match_obj)
