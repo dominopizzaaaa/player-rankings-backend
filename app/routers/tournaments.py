@@ -232,8 +232,11 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
             player_stats[p2]["points_lost"] += s[0]
 
     result = await db.execute(
-        select(TournamentPlayer).where(TournamentPlayer.tournament_id == tournament.id)
+        select(Tournament)
+        .options(selectinload(Tournament.players))  # already used elsewhere
+        .where(Tournament.id == tournament_id)
     )
+
     players_by_group = {}
     for tp in result.scalars().all():
         players_by_group.setdefault(tp.group_number, []).append(tp.player_id)
@@ -262,6 +265,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         group_rankings[group_num] = ranked
 
     group_matrix["rankings"] = group_rankings
+    print("🏁 Final standings in details endpoint:", tournament.final_standings)
 
     return TournamentDetailsResponse(
         id=tournament.id,
@@ -553,7 +557,7 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
 
         tournament.final_standings = final_standings
         await db.commit()
-        print("✅ Final Standings:", final_standings)
+        print("🔥 Final standings committed:", tournament.final_standings)
         return
 
     # 6. Seed next round (pair winners in order)
@@ -589,7 +593,7 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         db.add(match)
 
     await db.commit()
-    
+
 @router.post("/matches/{match_id}/result")
 async def submit_tournament_match_result(
     match_id: int,
