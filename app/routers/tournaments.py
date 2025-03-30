@@ -473,8 +473,10 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     for m in matches:
         rounds[m.round].append(m)
 
+    round_names = sorted(rounds.keys())
+
     # 3. Get the most recent round (last one with matches)
-    last_round_name = sorted(rounds.keys())[-1]
+    last_round_name = round_names[-1]
     last_round_matches = rounds[last_round_name]
 
     # 4. Check if all matches in that round are completed
@@ -485,33 +487,55 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     winners = [m.winner_id for m in last_round_matches if m.winner_id]
 
     if len(winners) == 1:
-        # 🎯 Final is over – store standings
-        first_place = winners[0]
-        final_match = last_round_matches[0]
-        second_place = final_match.player1_id if final_match.winner_id != final_match.player1_id else final_match.player2_id
-
-        # ✅ Now get semi-final losers
-        semifinal_rounds = [r for r in rounds.keys() if r.startswith("Round of 4")]
-        third_fourth = []
-        if semifinal_rounds:
-            semi_matches = rounds[semifinal_rounds[0]]
-            for match in semi_matches:
-                if match.winner_id:
-                    loser = match.player1_id if match.winner_id != match.player1_id else match.player2_id
-                    third_fourth.append(loser)
-
         tournament = await db.get(Tournament, tournament_id)
+        final_match = last_round_matches[0]
+        first = winners[0]
+        second = final_match.player1_id if final_match.winner_id != final_match.player1_id else final_match.player2_id
+
+        # Determine 3rd/4th if possible
+        third, fourth = None, None
+
+        if len(round_names) >= 2 and "Round of 4" in rounds:
+            semi_matches = rounds["Round of 4"]
+            semi_losers = [
+                m.player1_id if m.winner_id != m.player1_id else m.player2_id
+                for m in semi_matches
+            ]
+            # Check if match already exists
+            existing_3rd_match = await db.execute(
+                select(TournamentMatch).where(
+                    TournamentMatch.round == "3rd Place Match",
+                    TournamentMatch.tournament_id == tournament_id
+                )
+            )
+            existing = existing_3rd_match.scalars().first()
+            if not existing and len(semi_losers) == 2:
+                db.add(TournamentMatch(
+                    tournament_id=tournament_id,
+                    player1_id=semi_losers[0],
+                    player2_id=semi_losers[1],
+                    round="3rd Place Match",
+                    stage="knockout"
+                ))
+                await db.commit()
+                return  # wait for 3rd match result
+
+            # If match exists and has result
+            if existing and existing.winner_id:
+                third = existing.winner_id
+                fourth = existing.player1_id if existing.winner_id != existing.player1_id else existing.player2_id
+
+        # Store final standings
         tournament.final_standings = {
-            "1st": first_place,
-            "2nd": second_place,
-            "3rd/4th": third_fourth
+            "1st": first,
+            "2nd": second,
+            "3rd": third,
+            "4th": fourth
         }
-        db.add(tournament)
         await db.commit()
-
-        print("✅ Final standings saved to tournament.")
+        print("✅ Final Standings:", tournament.final_standings)
         return
-
+    
     # 6. Seed next round (pair winners in order)
     next_round_name = f"Round of {len(winners)}"
 
