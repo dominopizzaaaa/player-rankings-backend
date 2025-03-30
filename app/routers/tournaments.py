@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
-from app.models import Tournament, GroupingMode, TournamentPlayer, TournamentMatch, Player, TournamentSetScore
+from app.models import Tournament, GroupingMode, TournamentPlayer, TournamentMatch, Player, TournamentSetScore, TournamentStanding
 from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse, TournamentMatchResult
 from sqlalchemy.orm import selectinload, aliased
+from sqlalchemy.orm.attributes import flag_modified
 from app.database import get_db
 from sqlalchemy import delete, update, or_
 from typing import List
@@ -116,11 +117,12 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         raise HTTPException(status_code=404, detail="Tournament not found.")
 
     from collections import defaultdict
-
-    bracket_by_round = defaultdict(list)
     Player1 = aliased(Player)
     Player2 = aliased(Player)
 
+    bracket_by_round = defaultdict(list)
+
+    # 🏓 Fetch matches
     match_query = (
         select(
             TournamentMatch.id,
@@ -137,9 +139,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         )
         .outerjoin(Player1, TournamentMatch.player1_id == Player1.id)
         .outerjoin(Player2, TournamentMatch.player2_id == Player2.id)
-        .where(
-            TournamentMatch.tournament_id == tournament_id,
-        )
+        .where(TournamentMatch.tournament_id == tournament_id)
     )
     result = await db.execute(match_query)
     matches = result.all()
@@ -152,14 +152,8 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     for s in score_results.scalars().all():
         set_scores_by_match.setdefault(s.match_id, []).append([s.player1_score, s.player2_score])
 
-    group_matches = []
-    knockout_matches = []
-    individual_matches = []
-
-    group_matrix = {
-        "players": [],
-        "results": {}
-    }
+    group_matches, knockout_matches, individual_matches = [], [], []
+    group_matrix = { "players": [], "results": {} }
     group_player_set = set()
 
     for match in matches:
@@ -181,25 +175,23 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
             group_matches.append(match_obj)
             group_player_set.add(match.player1_id)
             group_player_set.add(match.player2_id)
-
             key = f"{match.player1_id}-{match.player2_id}"
-            result = {
+            group_matrix["results"][key] = {
                 "winner": match.winner_id,
                 "score": f"{match.player1_score}-{match.player2_score}",
                 "set_scores": " ".join(f"({s[0]}-{s[1]})" for s in match_obj.set_scores)
             }
-            group_matrix["results"][key] = result
 
         elif match.stage == "knockout":
             knockout_matches.append(match_obj)
             round_label = match.round if match.round != "3rd Place Match" else "Round of 2"
             bracket_by_round[round_label].append(match_obj)
-
         else:
             individual_matches.append(match_obj)
 
     group_matrix["players"] = sorted(list(group_player_set))
 
+    # 📊 Group ranking logic
     player_stats = defaultdict(lambda: {
         "wins": 0,
         "losses": 0,
@@ -212,7 +204,6 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     for match in group_matches:
         if match.winner_id is None:
             continue
-
         p1, p2 = match.player1_id, match.player2_id
         if match.winner_id == p1:
             player_stats[p1]["wins"] += 1
@@ -220,7 +211,6 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         else:
             player_stats[p2]["wins"] += 1
             player_stats[p1]["losses"] += 1
-
         for s in match.set_scores:
             player_stats[p1]["set_wins"] += int(s[0] > s[1])
             player_stats[p1]["set_losses"] += int(s[0] < s[1])
@@ -231,15 +221,15 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
             player_stats[p2]["points_won"] += s[1]
             player_stats[p2]["points_lost"] += s[0]
 
+    # ✅ Load groupings
     result = await db.execute(
-        select(Tournament)
-        .options(selectinload(Tournament.players))  # already used elsewhere
-        .where(Tournament.id == tournament_id)
+        select(Tournament).options(selectinload(Tournament.players)).where(Tournament.id == tournament_id)
     )
+    tournament = result.scalars().first()
 
-    players_by_group = {}
-    for tp in result.scalars().all():
-        players_by_group.setdefault(tp.group_number, []).append(tp.player_id)
+    players_by_group = defaultdict(list)
+    for tp in tournament.players:
+        players_by_group[tp.group_number].append(tp.player_id)
 
     def sort_key(pid):
         stats = player_stats[pid]
@@ -252,7 +242,6 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     group_rankings = {}
     for group_num, pids in players_by_group.items():
         ranked = sorted(pids, key=sort_key)
-
         i = 0
         while i < len(ranked) - 1:
             a, b = ranked[i], ranked[i + 1]
@@ -261,11 +250,20 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
                 if h2h and h2h["winner"] == b:
                     ranked[i], ranked[i + 1] = ranked[i + 1], ranked[i]
             i += 1
-
         group_rankings[group_num] = ranked
 
     group_matrix["rankings"] = group_rankings
-    print("🏁 Final standings in details endpoint:", tournament.final_standings)
+
+    # ✅ Final standings from TournamentStanding table
+    standings_result = await db.execute(
+        select(TournamentStanding).where(TournamentStanding.tournament_id == tournament_id)
+    )
+    standings_entries = standings_result.scalars().all()
+    final_standings = {}
+    for s in standings_entries:
+        final_standings[f"{s.position}"] = s.player_id
+
+    print("🏁 Final standings in details endpoint:", final_standings)
 
     return TournamentDetailsResponse(
         id=tournament.id,
@@ -279,7 +277,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         group_matches=group_matches,
         knockout_matches=knockout_matches,
         individual_matches=individual_matches,
-        final_standings=tournament.final_standings or {},
+        final_standings=final_standings,
         group_matrix=group_matrix,
         knockout_bracket=dict(bracket_by_round)
     )
@@ -459,9 +457,14 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
 
 async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     tournament = await db.get(Tournament, tournament_id)
-    if tournament.final_standings:
+
+    # ✅ Check if standings already exist in TournamentStanding table
+    existing = await db.execute(
+        select(TournamentStanding).where(TournamentStanding.tournament_id == tournament_id)
+    )
+    if existing.scalars().first():
         print("🏁 Tournament is already complete.")
-        return  # Stop if standings already exist
+        return
 
     # 1. Get all knockout matches
     result = await db.execute(
@@ -488,7 +491,18 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         if m.round != "3rd Place Match":
             rounds[m.round].append(m)
 
-    round_names = sorted(rounds.keys())
+    def round_sort_key(name):
+        if name == "Final" or name == "Round of 2":
+            return 999
+        if name == "3rd Place Match":
+            return 998
+        try:
+            return int(name.split()[-1])
+        except:
+            return 0
+
+    round_names = sorted(rounds.keys(), key=round_sort_key)
+
     last_round_name = round_names[-1]
     last_round_matches = rounds[last_round_name]
 
@@ -545,19 +559,18 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
             third = third_match.winner_id
             fourth = third_match.player1_id if third_match.winner_id != third_match.player1_id else third_match.player2_id
 
-        # ✅ Store final standings
-        final_standings = {
-            "1st": first,
-            "2nd": second,
-        }
+        # ✅ Save final standings to new table
+        db.add_all([
+            TournamentStanding(tournament_id=tournament_id, player_id=first, position=1),
+            TournamentStanding(tournament_id=tournament_id, player_id=second, position=2)
+        ])
         if third:
-            final_standings["3rd"] = third
+            db.add(TournamentStanding(tournament_id=tournament_id, player_id=third, position=3))
         if fourth:
-            final_standings["4th"] = fourth
+            db.add(TournamentStanding(tournament_id=tournament_id, player_id=fourth, position=4))
 
-        tournament.final_standings = final_standings
         await db.commit()
-        print("🔥 Final standings committed:", tournament.final_standings)
+        print("✅ Final standings saved via TournamentStanding")
         return
 
     # 6. Seed next round (pair winners in order)
@@ -684,3 +697,8 @@ async def force_generate_ko(tournament_id: int, db: AsyncSession = Depends(get_d
 
     await generate_knockout_stage_matches(tournament, db)
     return {"message": f"KO generated for tournament {tournament_id}"}
+
+@router.post("/{tournament_id}/advance-knockout")
+async def trigger_knockout_advancement(tournament_id: int, db: AsyncSession = Depends(get_db)):
+    await advance_knockout_rounds(tournament_id, db)
+    return {"message": "Knockout advancement executed"}

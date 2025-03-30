@@ -49,8 +49,19 @@ class Tournament(Base):
     knockout_size = Column(Integer, nullable=False)
     grouping_mode = Column(Enum(GroupingMode), nullable=False)
     created_at = Column(Date, nullable=False)
-    final_standings = Column(JSON, nullable=True)
+    standings = relationship("TournamentStanding", back_populates="tournament", cascade="all, delete-orphan")
     players = relationship("TournamentPlayer", back_populates="tournament", cascade="all, delete-orphan")
+
+class TournamentStanding(Base):
+    __tablename__ = "tournament_standings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
+    player_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    position = Column(Integer, nullable=False)  # 1 = 1st, 2 = 2nd, etc.
+
+    tournament = relationship("Tournament", back_populates="standings")
+    player = relationship("Player")
 
 class TournamentPlayer(Base):
     __tablename__ = "tournament_players"
