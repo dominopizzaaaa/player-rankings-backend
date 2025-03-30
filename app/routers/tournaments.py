@@ -283,7 +283,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         group_matches=group_matches,
         knockout_matches=knockout_matches,
         individual_matches=individual_matches,
-        final_standings=tournament.final_standings or [],
+        final_standings=tournament.final_standings or {},
         group_matrix=group_matrix,
         knockout_bracket=dict(bracket_by_round)
     )
