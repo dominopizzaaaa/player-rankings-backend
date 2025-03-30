@@ -40,7 +40,7 @@ class Tournament(Base):
     date = Column(Date, nullable=False)
     num_players = Column(Integer, nullable=False)
     num_groups = Column(Integer, nullable=False)
-    knockout_size = Column(Integer, nullable=False)
+    players_advance_per_group = Column(Integer, nullable=True)
     created_at = Column(Date, nullable=False)
     standings = relationship("TournamentStanding", back_populates="tournament", cascade="all, delete-orphan")
     players = relationship("TournamentPlayer", back_populates="tournament", cascade="all, delete-orphan")

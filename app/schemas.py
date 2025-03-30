@@ -39,7 +39,7 @@ class TournamentCreate(BaseModel):
     name: str
     date: dt_date
     num_groups: int
-    knockout_size: int
+    players_per_group_advancing: int
     player_ids: List[int]  # ✅ New field
 
 class TournamentResponse(BaseModel):
@@ -48,7 +48,7 @@ class TournamentResponse(BaseModel):
     date: dt_date
     num_players: int
     num_groups: int
-    knockout_size: int
+    players_advance_per_group: Optional[int]
     created_at: dt_date
     player_ids: List[int]  # ✅ Required in response
 

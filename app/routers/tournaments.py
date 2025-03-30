@@ -17,14 +17,25 @@ router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
 
 @router.post("/", response_model=dict)
 async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Depends(get_db), admin=True):
+    def next_power_of_two(n: int) -> int:
+        power = 1
+        while power < n:
+            power *= 2
+        return power
+    
+    total_ko_players = tournament.num_groups * tournament.players_per_group_advancing
+    computed_ko_size = next_power_of_two(total_ko_players)
+
     new_tournament = Tournament(
         name=tournament.name,
         date=tournament.date,
         num_groups=tournament.num_groups,
-        knockout_size=tournament.knockout_size,
+        knockout_size=computed_ko_size,
+        players_advance_per_group=tournament.players_per_group_advancing,  # ✅
         created_at=datetime.now(timezone.utc),
         num_players=len(tournament.player_ids)
     )
+
     db.add(new_tournament)
     await db.flush()  # Assigns new_tournament.id
 
