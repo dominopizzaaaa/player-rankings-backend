@@ -10,6 +10,7 @@ from sqlalchemy import delete, update
 from typing import List
 import random
 from collections import defaultdict
+from itertools import permutations
 
 router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
 
@@ -314,7 +315,8 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
     seeded_players = []
     remaining_players = []
 
-    # 🔍 Determine seeding strategy
+    group_assignments = {}  # player_id -> group_number
+
     if tournament.num_groups == 0:
         # ✅ No groups → seed by Elo rating
         result = await db.execute(
@@ -328,7 +330,6 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
         ratings = dict(elo_result.all())
         sorted_players = sorted(player_ids, key=lambda pid: -ratings.get(pid, 0))
 
-        # Top 2 are seeds
         if sorted_players:
             bracket[0] = sorted_players[0]
         if len(sorted_players) > 1:
@@ -347,6 +348,7 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
         group_map = defaultdict(list)
         for p in players:
             group_map[p.group_number].append(p.player_id)
+            group_assignments[p.player_id] = p.group_number
 
         result = await db.execute(
             select(TournamentMatch)
@@ -355,32 +357,26 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
         )
         group_matches = result.scalars().all()
 
-        # Build win count per player and head-to-heads
         wins = defaultdict(int)
         for m in group_matches:
             if m.winner_id:
                 wins[m.winner_id] += 1
 
-        # Group rankings: top 1 from each group
         group_rankings = {}
         for group_num, pids in group_map.items():
             sorted_group = sorted(pids, key=lambda pid: -wins[pid])
             group_rankings[group_num] = sorted_group
 
-        # Primary seeds: top player in each group
         for group_num in sorted(group_rankings.keys()):
             seeded_players.append(group_rankings[group_num][0])
 
-        # Add best "second-place" players to complete seeds if needed
         second_place_candidates = [
             group[1] for group in group_rankings.values() if len(group) > 1
         ]
-        # Sort 2nd places by wins
         second_place_candidates.sort(key=lambda pid: -wins[pid])
-        while len(seeded_players) < min(KO_SIZE, 4) and second_place_candidates:
+        while len(seeded_players) < KO_SIZE and second_place_candidates:
             seeded_players.append(second_place_candidates.pop(0))
 
-        # Place top 2 seeds
         if seeded_players:
             bracket[0] = seeded_players[0]
         if len(seeded_players) > 1:
@@ -390,17 +386,46 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
             pid for pid in set(p.player_id for p in players)
             if pid not in set(filter(None, bracket))
         ]
+
+    # 🧩 Avoid first-round group clashes if possible
+    def is_valid_bracket(b):
+        for i in range(0, KO_SIZE, 2):
+            p1 = b[i]
+            p2 = b[i + 1] if i + 1 < KO_SIZE else None
+            if p1 and p2:
+                g1 = group_assignments.get(p1)
+                g2 = group_assignments.get(p2)
+                if g1 is not None and g2 is not None and g1 == g2:
+                    return False
+        return True
+
+    # Only if groups exist
+    if tournament.num_groups > 0:
+        candidates = remaining_players.copy()
+        random.shuffle(candidates)
+        free_indices = [i for i, val in enumerate(bracket) if val is None]
+
+        # Try all permutations to find a valid one
+        for perm in permutations(candidates):
+            test_bracket = bracket.copy()
+            for idx, val in zip(free_indices, perm):
+                test_bracket[idx] = val
+            if is_valid_bracket(test_bracket):
+                bracket = test_bracket
+                break
+        else:
+            print("⚠️ No valid KO bracket found avoiding group clashes, using fallback.")
+
+    else:
         random.shuffle(remaining_players)
+        i = 0
+        for pid in remaining_players:
+            while i < KO_SIZE and bracket[i] is not None:
+                i += 1
+            if i < KO_SIZE:
+                bracket[i] = pid
 
-    # 🎯 Fill remaining bracket slots
-    i = 0
-    for pid in remaining_players:
-        while i < KO_SIZE and bracket[i] is not None:
-            i += 1
-        if i < KO_SIZE:
-            bracket[i] = pid
-
-    # 🧠 Create matches (with auto-wins for free passes)
+    # 🧠 Create matches
     for i in range(0, KO_SIZE, 2):
         p1 = bracket[i]
         p2 = bracket[i + 1] if i + 1 < KO_SIZE else None
@@ -408,7 +433,6 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
         if p1 is None and p2 is None:
             continue
         elif p2 is None:
-            # Free pass
             db.add(TournamentMatch(
                 tournament_id=tournament.id,
                 player1_id=p1,
