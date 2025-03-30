@@ -38,6 +38,7 @@ class Tournament(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
     date = Column(Date, nullable=False)
+    knockout_size = Column(Integer)  # ✅ Re-add this
     num_players = Column(Integer, nullable=False)
     num_groups = Column(Integer, nullable=False)
     players_advance_per_group = Column(Integer, nullable=True)

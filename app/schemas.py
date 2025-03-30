@@ -51,6 +51,7 @@ class TournamentResponse(BaseModel):
     players_advance_per_group: Optional[int]
     created_at: dt_date
     player_ids: List[int]  # ✅ Required in response
+    knockout_size: int  # ✅ Re-add this
 
     class Config:
         orm_mode = True
