@@ -479,11 +479,12 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     if not matches:
         return  # No knockout matches to process
 
-    # 2. Group matches by round
-    from collections import defaultdict
+    # 2. Group matches by round (exclude "3rd Place Match" from progression logic)
     rounds = defaultdict(list)
     for m in matches:
-        rounds[m.round].append(m)
+        if m.round != "3rd Place Match":
+            rounds[m.round].append(m)
+
 
     round_names = sorted(rounds.keys())
 
