@@ -37,7 +37,7 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
     )
 
     db.add(new_tournament)
-    await db.flush()  # Assigns new_tournament.id
+    await db.flush()
 
     players = tournament.player_ids[:]
 
@@ -312,18 +312,14 @@ async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
 
 async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSession):
     print("🧠 Starting KO generation for", tournament.id)
-    print("Number of groups:", tournament.num_groups)
-    print("KO size:", tournament.knockout_size)
 
-    KO_SIZE = tournament.knockout_size
-    bracket = [None] * KO_SIZE
-    seeded_players = []
-    remaining_players = []
+    from math import ceil, log2
 
-    group_assignments = {}  # player_id -> group_number
+    group_assignments = {}
+    players_advancing = []
 
     if tournament.num_groups == 0:
-        # ✅ No groups → seed by Elo rating
+        # ✅ All players go to knockout, seed by Elo
         result = await db.execute(
             select(TournamentPlayer.player_id).where(TournamentPlayer.tournament_id == tournament.id)
         )
@@ -333,18 +329,10 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
             select(Player.id, Player.rating).where(Player.id.in_(player_ids))
         )
         ratings = dict(elo_result.all())
-        sorted_players = sorted(player_ids, key=lambda pid: -ratings.get(pid, 0))
-
-        if sorted_players:
-            bracket[0] = sorted_players[0]
-        if len(sorted_players) > 1:
-            bracket[-1] = sorted_players[1]
-
-        seeded_ids = set(filter(None, [bracket[0], bracket[-1]]))
-        remaining_players = [pid for pid in sorted_players if pid not in seeded_ids]
+        players_advancing = sorted(player_ids, key=lambda pid: -ratings.get(pid, 0))
 
     else:
-        # ✅ Use group stage results
+        # ✅ Pick top X from each group
         result = await db.execute(
             select(TournamentPlayer).where(TournamentPlayer.tournament_id == tournament.id)
         )
@@ -373,71 +361,39 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
             group_rankings[group_num] = sorted_group
 
         for group_num in sorted(group_rankings.keys()):
-            seeded_players.append(group_rankings[group_num][0])
+            ranked = group_rankings[group_num]
+            top_n = ranked[:tournament.players_advance_per_group]
+            players_advancing.extend(top_n)
 
-        second_place_candidates = [
-            group[1] for group in group_rankings.values() if len(group) > 1
-        ]
-        second_place_candidates.sort(key=lambda pid: -wins[pid])
-        while len(seeded_players) < KO_SIZE and second_place_candidates:
-            seeded_players.append(second_place_candidates.pop(0))
+    # 🧠 Compute KO bracket size
+    ko_size = 2 ** ceil(log2(len(players_advancing)))
+    bracket = [None] * ko_size
 
-        if seeded_players:
-            bracket[0] = seeded_players[0]
-        if len(seeded_players) > 1:
-            bracket[-1] = seeded_players[1]
+    print(f"🔢 {len(players_advancing)} players advancing → KO size: {ko_size}")
 
-        remaining_players = [
-            pid for pid in set(p.player_id for p in players)
-            if pid not in set(filter(None, bracket))
-        ]
+    # 🎯 Seed top 2
+    if players_advancing:
+        bracket[0] = players_advancing[0]
+    if len(players_advancing) > 1:
+        bracket[-1] = players_advancing[1]
 
-    # 🧩 Avoid first-round group clashes if possible
-    def is_valid_bracket(b):
-        for i in range(0, KO_SIZE, 2):
-            p1 = b[i]
-            p2 = b[i + 1] if i + 1 < KO_SIZE else None
-            if p1 and p2:
-                g1 = group_assignments.get(p1)
-                g2 = group_assignments.get(p2)
-                if g1 is not None and g2 is not None and g1 == g2:
-                    return False
-        return True
+    seeded_ids = set(filter(None, [bracket[0], bracket[-1]]))
+    remaining = [pid for pid in players_advancing if pid not in seeded_ids]
 
-    # Only if groups exist
-    if tournament.num_groups > 0:
-        candidates = remaining_players.copy()
-        random.shuffle(candidates)
-        free_indices = [i for i, val in enumerate(bracket) if val is None]
+    random.shuffle(remaining)
+    i = 0
+    for pid in remaining:
+        while i < ko_size and bracket[i] is not None:
+            i += 1
+        if i < ko_size:
+            bracket[i] = pid
 
-        # Try all permutations to find a valid one
-        for perm in permutations(candidates):
-            test_bracket = bracket.copy()
-            for idx, val in zip(free_indices, perm):
-                test_bracket[idx] = val
-            if is_valid_bracket(test_bracket):
-                bracket = test_bracket
-                break
-        else:
-            print("⚠️ No valid KO bracket found avoiding group clashes, using fallback.")
-
-    else:
-        random.shuffle(remaining_players)
-        i = 0
-        for pid in remaining_players:
-            while i < KO_SIZE and bracket[i] is not None:
-                i += 1
-            if i < KO_SIZE:
-                bracket[i] = pid
-
-    # 🧠 Create matches
-    for i in range(0, KO_SIZE, 2):
+    # 🧾 Create matches
+    for i in range(0, ko_size, 2):
         p1 = bracket[i]
-        p2 = bracket[i + 1] if i + 1 < KO_SIZE else None
+        p2 = bracket[i + 1] if i + 1 < ko_size else None
 
-        if p1 is None and p2 is None:
-            continue
-        elif p2 is None:
+        if p1 and not p2:
             db.add(TournamentMatch(
                 tournament_id=tournament.id,
                 player1_id=p1,
@@ -445,15 +401,15 @@ async def generate_knockout_stage_matches(tournament: Tournament, db: AsyncSessi
                 winner_id=p1,
                 player1_score=1,
                 player2_score=0,
-                round=f"Round of {KO_SIZE}",
+                round=f"Round of {ko_size}",
                 stage="knockout"
             ))
-        else:
+        elif p1 and p2:
             db.add(TournamentMatch(
                 tournament_id=tournament.id,
                 player1_id=p1,
                 player2_id=p2,
-                round=f"Round of {KO_SIZE}",
+                round=f"Round of {ko_size}",
                 stage="knockout"
             ))
 
