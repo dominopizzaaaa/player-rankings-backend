@@ -347,15 +347,59 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
         )
         group_matches = result.scalars().all()
 
-        wins = defaultdict(int)
+        # 🧠 Reuse group ranking logic here
+        player_stats = defaultdict(lambda: {
+            "wins": 0,
+            "set_wins": 0,
+            "set_losses": 0,
+            "points_won": 0,
+            "points_lost": 0,
+        })
+
+                # First, fetch set scores for all group matches
+        match_ids = [m.id for m in group_matches]
+        set_score_result = await db.execute(
+            select(TournamentSetScore).where(TournamentSetScore.match_id.in_(match_ids))
+        )
+        set_scores_by_match = defaultdict(list)
+        for s in set_score_result.scalars().all():
+            set_scores_by_match[s.match_id].append([s.player1_score, s.player2_score])
+
+        # Now process matches and compute stats
         for m in group_matches:
-            if m.winner_id:
-                wins[m.winner_id] += 1
+            if m.winner_id is None:
+                continue
+            p1, p2 = m.player1_id, m.player2_id
+            if m.winner_id == p1:
+                player_stats[p1]["wins"] += 1
+            else:
+                player_stats[p2]["wins"] += 1
+
+            set_scores = set_scores_by_match.get(m.id, [])
+            for s in set_scores:
+                player_stats[p1]["set_wins"] += int(s[0] > s[1])
+                player_stats[p1]["set_losses"] += int(s[0] < s[1])
+                player_stats[p2]["set_wins"] += int(s[1] > s[0])
+                player_stats[p2]["set_losses"] += int(s[1] < s[0])
+                player_stats[p1]["points_won"] += s[0]
+                player_stats[p1]["points_lost"] += s[1]
+                player_stats[p2]["points_won"] += s[1]
+                player_stats[p2]["points_lost"] += s[0]
+
+        # Use point differential: points won - points lost
+        def sort_key(pid):
+            stats = player_stats[pid]
+            return (
+                -stats["wins"],                             # 1. Wins
+                -(stats["set_wins"] - stats["set_losses"]), # 2. Set difference
+                -(stats["points_won"] - stats["points_lost"]) # 3. Point difference ✅ fixed
+            )
+
 
         group_rankings = {}
         for group_num, pids in group_map.items():
-            sorted_group = sorted(pids, key=lambda pid: -wins[pid])
-            group_rankings[group_num] = sorted_group
+            ranked = sorted(pids, key=sort_key)
+            group_rankings[group_num] = ranked
 
         for group_num in sorted(group_rankings.keys()):
             ranked = group_rankings[group_num]
@@ -364,12 +408,25 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
 
     num_players = len(players_advancing)
     ko_size = 2 ** ceil(log2(num_players))
-    num_matches = ko_size // 2
     num_byes = ko_size - num_players
 
     print(f"🔢 {num_players} players advancing → KO size: {ko_size}, byes: {num_byes}")
 
-    # ✅ Seed top players to get byes
+    advance_count = tournament.players_advance_per_group
+
+    # Collect ranked players from each group into buckets by rank
+    rank_buckets = defaultdict(list)
+
+    for group_num, ranked in group_rankings.items():
+        for i in range(min(advance_count, len(ranked))):
+            rank_buckets[i].append(ranked[i])  # i = 0 means 1st place, etc.
+
+    # Create final list by merging sorted buckets
+    players_advancing = []
+    for i in range(advance_count):
+        tier = sorted(rank_buckets[i], key=sort_key)
+        players_advancing.extend(tier)
+
     seeded = players_advancing[:num_byes]
     rest = players_advancing[num_byes:]
     random.shuffle(rest)
