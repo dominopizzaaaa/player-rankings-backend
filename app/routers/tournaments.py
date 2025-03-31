@@ -464,7 +464,7 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
 
     round_names = sorted(rounds.keys(), key=round_sort_key)
 
-    last_round_name = round_names[-1]
+    last_round_name = round_names[0] # chnage to [0]
     last_round_matches = rounds[last_round_name]
 
     # 3. Check if all matches in that round are completed
@@ -541,7 +541,8 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         return
 
     # 6. Seed next round (pair winners in order)
-    next_round_name = "Final" if len(winners) == 2 else f"Round of {len(winners)}"
+    next_round_size = len(winners)
+    next_round_name = "Final" if next_round_size == 2 else f"Round of {next_round_size}"
 
     # 🔒 Avoid duplicate next round
     existing_next_round = await db.execute(
@@ -551,8 +552,9 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
             TournamentMatch.stage == "knockout"
         )
     )
-    if existing_next_round.scalars().first():
-        print(f"⚠️ Round {next_round_name} already exists. Skipping regeneration.")
+    existing_next_round_matches = existing_next_round.scalars().all()
+    if existing_next_round_matches:
+        print(f"⚠️ {next_round_name} already exists. Skipping regeneration.")
         return
 
     # 7. Create next-round matches
