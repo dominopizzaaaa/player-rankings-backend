@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
+from sqlalchemy.inspection import inspect
 from datetime import datetime, timezone
 import logging
 
@@ -130,12 +131,16 @@ async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depe
     if not match:
         raise HTTPException(status_code=404, detail="Match not found.")
 
-    # ✅ Update match attributes dynamically
+    # ✅ Only allow updates to actual columns (avoid triggering relationships)
+    column_keys = {column.key for column in inspect(Match).mapper.column_attrs}
+
     for key, value in update_data.items():
-        if hasattr(match, key) and value is not None:
+        if key in column_keys and value is not None:
             setattr(match, key, value)
 
     await db.commit()
-    return {"message": f"Match {match_id} updated successfully.", "updated_data": update_data}
-
-
+    await db.refresh(match)
+    return {
+        "message": f"Match {match_id} updated successfully.",
+        "updated_data": update_data,
+    }
