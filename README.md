@@ -1,129 +1,90 @@
+
 # Player Rankings Backend
 
-## Overview
-
-The backend of the **Player Rankings** system is built using **FastAPI** and **SQLAlchemy**, providing a high-performance API for handling player data, match records, and Elo ranking calculations.
-
-## Technologies Used
-
-- **FastAPI** – High-performance web framework
-- **SQLAlchemy (async)** – ORM for database interactions
-- **MySQL (Google Cloud SQL)** – Database for storing players and matches
-- **JWT (JSON Web Tokens)** – Secure authentication and admin access control
-- **CORS Middleware** – Allows frontend communication with the backend
-- **Uvicorn** – ASGI server for FastAPI
-
-## Hosting & Deployment
-
-- The backend is deployed on **Render.com** for automatic builds and hosting.
-- Uses **Google Cloud SQL** as the database.
-- Runs on **Uvicorn** for high-performance asynchronous execution.
+This is the backend service for the Elo-based Player Rankings System, built with FastAPI and connected to a MySQL database using SQLAlchemy.
 
 ## Features
 
-### 🏆 Player & Match Management
-- **CRUD operations** for players and matches.
-- **Elo ranking calculation** for each match.
-- **Match history tracking** with timestamps.
+- ✅ Player Management (Add, Edit, Delete players)
+- ✅ Match Management (Add matches, calculate Elo updates)
+- ✅ Tournament System (Round-robin group stage + knockout bracket)
+- ✅ Tournament Bracket Generator with full match dependency tracking
+- ✅ Group stage ranking logic with tiebreakers
+- ✅ Elo updates on tournament matches
+- ✅ Final standings and 3rd place match handling
+- ✅ Undo/reset tournaments (matches deleted, Elo unaffected)
 
-### 🔒 Authentication & Security
-- Uses **JWT-based authentication**.
-- Only admins can modify data.
-- Authentication is enforced on restricted routes.
+---
 
-### 🔀 API Endpoints
+## 🧠 Tournament System Overview
 
-#### **Authentication**
-- **POST /token** → Login and retrieve JWT token
+### 1. Tournament Creation
 
-#### **Players**
-- **GET /players** → Fetch all players
-- **GET /players/{id}** → Fetch player by ID
-- **POST /players** → Add a new player
-- **PATCH /players/{id}** → Update player details
-- **DELETE /players/{id}** → Remove player (and all matches)
+When creating a tournament via the API:
+- Admin selects a list of registered player IDs
+- Chooses number of groups (`num_groups`)
+- Chooses how many top players from each group will advance (`players_per_group_advancing`)
+- The system calculates total advancing players and rounds up to the next power of 2 for the knockout size
 
-#### **Matches**
-- **GET /matches** → Fetch all matches
-- **POST /matches** → Submit a match result (updates Elo ratings)
-- **PATCH /matches/{id}** → Update match details
-- **DELETE /matches/{id}** → Remove a match
+Example:
+- 3 groups, top 2 advance → 6 players
+- Knockout size = 8 → 2 byes added for highest-ranked players
 
-## Database Schema
+---
 
-### **Players Table**
-| Column  | Type     | Description |
-|---------|---------|-------------|
-| id      | INT (PK) | Unique player ID |
-| name    | STRING   | Player's name |
-| rating  | INT      | Elo rating (default 1500) |
-| matches | INT      | Number of matches played |
-| handedness | STRING | Left/Right-handed |
-| forehand_rubber | STRING | Forehand rubber details |
-| backhand_rubber | STRING | Backhand rubber details |
-| blade   | STRING   | Blade type |
-| age     | INT      | Player's age |
-| gender  | STRING   | Male/Female |
+### 2. Group Stage
 
-### **Matches Table**
-| Column  | Type     | Description |
-|---------|---------|-------------|
-| id      | INT (PK) | Match ID |
-| player1_id | INT (FK) | First player ID |
-| player2_id | INT (FK) | Second player ID |
-| player1_score | INT | Score of Player 1 |
-| player2_score | INT | Score of Player 2 |
-| winner_id | INT (FK) | Winner's ID |
-| timestamp | DATETIME | Match time |
+- Players are divided into `num_groups` as evenly as possible
+- Each group is a round-robin: all players play each other once
+- Match results are submitted manually via the API or frontend
 
-## Elo Rating Calculation
+#### Group Rankings Logic (Tiebreakers in order):
+1. Number of Wins
+2. Head-to-head result (if tied between two)
+3. Set difference (sets won - sets lost)
+4. Point difference (total points scored - points conceded)
 
-The Elo rating is calculated using:
+Group stage standings are updated dynamically as matches are submitted.
 
-```python
-def calculate_elo(old_rating, opponent_rating, outcome, games_played):
-    if games_played <= 10:
-        K = 40
-    elif games_played <= 200:
-        K = 24
-    else:
-        K = 16
-    expected_score = 1 / (1 + 10 ** ((opponent_rating - old_rating) / 400))
-    return old_rating + K * (outcome - expected_score)
-```
-- **K-factor** varies based on the number of games played.
-- **Expected score** determines the probability of winning.
-- **Outcome (1 = win, 0 = loss)** updates the rating accordingly.
+---
 
-## Deployment Steps
+### 3. Knockout Stage
 
-1. Clone the repository:
-   ```sh
-   git clone https://github.com/your-repo/player-rankings-backend.git
-   ```
+Once all group stage matches are submitted:
+- Top `players_per_group_advancing` from each group are selected
+- Bracket is filled with:
+  - First: group winners
+  - Then: best-ranked 2nd place players (if needed)
+- Players from the same group are avoided in Round 1 unless unavoidable
+- Byes are assigned to highest-ranked players if knockout size is larger than participants
 
-2. Install dependencies:
-   ```sh
-   cd player-rankings-backend
-   pip install -r requirements.txt
-   ```
+#### Bracket Generation:
+- All knockout matches are pre-generated with `p1_source_match_id` and `p2_source_match_id` dependencies
+- Each match advances winners by resolving these dependencies
+- A 3rd/4th place match is added automatically if there are at least 4 players
 
-3. Create `.env` file:
-   ```sh
-   DATABASE_URL="mysql+asyncmy://elo_user:password@your-database-url/player_rankings"
-   SECRET_KEY="your_secret_key"
-   ```
+---
 
-4. Run migrations:
-   ```sh
-   alembic upgrade head
-   ```
+### 4. Final Standings
 
-5. Start the FastAPI server:
-   ```sh
-   uvicorn app.main:app --host 0.0.0.0 --port 8000
-   ```
+Once final and 3rd place matches are completed:
+- Final standings are stored: 1st to 4th place
+- Displayed in frontend
 
-6. Deploy to **Render.com**
+---
 
-This backend ensures **secure, fast, and scalable** Elo ranking management. 🚀
+### 5. Elo Rating Updates
+
+- Every submitted match (including tournament matches) updates Elo ratings for both players
+- Elo is updated using a basic Elo formula
+
+---
+
+## API Endpoints
+
+- `POST /players` — Add player
+- `POST /matches` — Submit match
+- `POST /tournaments` — Create tournament
+- `POST /tournaments/{tournament_id}/submit_result` — Submit tournament match result
+- `GET /tournaments/{id}` — Get tournament details
+- `POST /tournaments/{id}/undo` — Reset tournament (delete matches only)
