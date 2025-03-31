@@ -755,6 +755,43 @@ async def submit_tournament_match_result(
 
     return {"message": "Tournament match result recorded"}
 
+@router.post("/{tournament_id}/reset")
+async def reset_tournament(tournament_id: int, db: AsyncSession = Depends(get_db)):
+    # Check tournament exists
+    tournament = await db.get(Tournament, tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    print(f"♻️ Resetting tournament ID: {tournament_id}")
+
+    # Delete all set scores
+    await db.execute(
+        delete(TournamentSetScore).where(
+            TournamentSetScore.match_id.in_(
+                select(TournamentMatch.id).where(TournamentMatch.tournament_id == tournament_id)
+            )
+        )
+    )
+
+    # Delete all tournament matches
+    await db.execute(
+        delete(TournamentMatch).where(TournamentMatch.tournament_id == tournament_id)
+    )
+
+    # Delete all final standings
+    await db.execute(
+        delete(TournamentStanding).where(TournamentStanding.tournament_id == tournament_id)
+    )
+
+    # Re-generate matches using existing group settings
+    if tournament.num_groups > 0:
+        await generate_group_stage_matches(tournament.id, db)
+    else:
+        await generate_knockout_stage_matches(tournament, db)
+
+    await db.commit()
+    return {"message": f"Tournament {tournament_id} reset and matches regenerated"}
+
 @router.post("/{tournament_id}/generate-ko")
 async def force_generate_ko(tournament_id: int, db: AsyncSession = Depends(get_db)):
     tournament = await db.get(Tournament, tournament_id)
