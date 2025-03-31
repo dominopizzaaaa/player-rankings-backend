@@ -120,3 +120,26 @@ class TournamentMatchResult(BaseModel):
 
     class Config:
         from_attributes = True
+
+class MatchHistoryEntry(BaseModel):
+    date: datetime
+    tournament: bool
+    winner_id: int
+    player1_id: int
+    player2_id: int
+    set_scores: Optional[List[dict]] = []
+
+class HeadToHeadResponse(BaseModel):
+    player1_id: int
+    player2_id: int
+    matches_played: int
+    player1_wins: int
+    player2_wins: int
+    player1_win_percentage: float
+    player2_win_percentage: float
+    player1_sets: int
+    player2_sets: int
+    player1_points: int
+    player2_points: int
+    most_recent_winner: Optional[int]
+    match_history: List[MatchHistoryEntry]

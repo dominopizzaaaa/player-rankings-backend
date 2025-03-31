@@ -805,3 +805,34 @@ async def force_generate_ko(tournament_id: int, db: AsyncSession = Depends(get_d
 async def trigger_knockout_advancement(tournament_id: int, db: AsyncSession = Depends(get_db)):
     await advance_knockout_rounds(tournament_id, db)
     return {"message": "Knockout advancement executed"}
+
+@router.delete("/{tournament_id}")
+async def delete_tournament(tournament_id: int, db: AsyncSession = Depends(get_db), admin=True):
+    from sqlalchemy import delete
+
+    # Get tournament
+    result = await db.execute(select(Tournament).where(Tournament.id == tournament_id))
+    tournament = result.scalar_one_or_none()
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    # Step 1: Get all matches for this tournament
+    matches_result = await db.execute(select(TournamentMatch).where(TournamentMatch.tournament_id == tournament_id))
+    matches = matches_result.scalars().all()
+
+    match_ids = [match.id for match in matches]
+    
+    # Step 2: Delete set scores first (if any)
+    if match_ids:
+        await db.execute(delete(TournamentSetScore).where(TournamentSetScore.match_id.in_(match_ids)))
+
+    # Step 3: Delete the matches
+    await db.execute(delete(TournamentMatch).where(TournamentMatch.tournament_id == tournament_id))
+
+    # Step 4: Delete the tournament
+    await db.delete(tournament)
+
+    # Commit the changes
+    await db.commit()
+
+    return {"message": f"Tournament {tournament_id} and its matches were deleted successfully."}
