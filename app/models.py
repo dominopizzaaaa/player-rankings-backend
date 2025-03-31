@@ -1,21 +1,21 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Date, Boolean, Enum
-from sqlalchemy.sql import func
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Date
+from sqlalchemy.orm import relationship
 from .database import Base
-import enum
+from datetime import datetime, timezone
 
 class Player(Base):
     __tablename__ = "players"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
+    name = Column(String(100), nullable=False)  # ✅ Explicit length added
     matches = Column(Integer, default=0)
-    rating = Column(Integer, default=1000)
-    handedness = Column(String(10), nullable=True)  # Right or Left
-    forehand_rubber = Column(String(100), nullable=True)
-    backhand_rubber = Column(String(100), nullable=True)
-    blade = Column(String(100), nullable=True)
+    rating = Column(Integer, default=1500)
+    handedness = Column(String(10), nullable=True)  # ✅ Explicit length added
+    forehand_rubber = Column(String(100), nullable=True)  # ✅ Explicit length added
+    backhand_rubber = Column(String(100), nullable=True)  # ✅ Explicit length added
+    blade = Column(String(100), nullable=True)  # ✅ Explicit length added
     age = Column(Integer, nullable=True)
-    gender = Column(String(10), nullable=True)
+    gender = Column(String(10), nullable=True)  # ✅ Explicit length added
 
 class Match(Base):
     __tablename__ = "matches"
@@ -23,28 +23,39 @@ class Match(Base):
     id = Column(Integer, primary_key=True, index=True)
     player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    player1_score = Column(Integer, nullable=False)
-    player2_score = Column(Integer, nullable=False)
-    winner_id = Column(Integer, ForeignKey("players.id"), nullable=False)  # ✅ Add winner
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    player1_score = Column(Integer, nullable=False, default=0)
+    player2_score = Column(Integer, nullable=False, default=0)
+    winner_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    timestamp = Column(DateTime, default=datetime.now(timezone.utc))
 
-class GroupingMode(enum.Enum):
-    RANKED = "ranked"
-    RANDOM = "random"
+    player1 = relationship("Player", foreign_keys=[player1_id])
+    player2 = relationship("Player", foreign_keys=[player2_id])
+    match_winner = relationship("Player", foreign_keys=[winner_id])
 
 class Tournament(Base):
     __tablename__ = "tournaments"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
+    name = Column(String(100), nullable=False)
     date = Column(Date, nullable=False)
+    knockout_size = Column(Integer)  # ✅ Re-add this
     num_players = Column(Integer, nullable=False)
     num_groups = Column(Integer, nullable=False)
-    knockout_size = Column(Integer, nullable=False)
-    grouping_mode = Column(Enum(GroupingMode), nullable=False)
-    created_by = Column(String, nullable=False)  # or Integer if linking to a user table
+    players_advance_per_group = Column(Integer, nullable=True)
     created_at = Column(Date, nullable=False)
+    standings = relationship("TournamentStanding", back_populates="tournament", cascade="all, delete-orphan")
+    players = relationship("TournamentPlayer", back_populates="tournament", cascade="all, delete-orphan")
 
+class TournamentStanding(Base):
+    __tablename__ = "tournament_standings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
+    player_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    position = Column(Integer, nullable=False)  # 1 = 1st, 2 = 2nd, etc.
+
+    tournament = relationship("Tournament", back_populates="standings")
+    player = relationship("Player")
 
 class TournamentPlayer(Base):
     __tablename__ = "tournament_players"
@@ -54,16 +65,30 @@ class TournamentPlayer(Base):
     player_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     group_number = Column(Integer, nullable=False)
     seed = Column(Integer, nullable=True)  # based on Elo
-
+    tournament = relationship("Tournament", back_populates="players")
 
 class TournamentMatch(Base):
     __tablename__ = "tournament_matches"
+    set_scores = relationship("TournamentSetScore", back_populates="match", cascade="all, delete-orphan")
 
     id = Column(Integer, primary_key=True, index=True)
     tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
-    match_id = Column(Integer, ForeignKey("matches.id"), nullable=True)
-    stage = Column(String, nullable=False)  # e.g., "RR", "KO"
-    group_number = Column(Integer, nullable=True)
-    round_number = Column(Integer, nullable=True)
+    player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    player2_id = Column(Integer, ForeignKey("players.id"), nullable=True)
+    player1_score = Column(Integer, nullable=True)
+    player2_score = Column(Integer, nullable=True)
     winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)
-    updated = Column(Boolean, default=False)
+    round = Column(String(50), nullable=False)  # e.g., "Group A", "Quarterfinal", "Final"
+    stage = Column(String(20), nullable=False)  # "group" or "knockout"
+    set_scores = relationship("TournamentSetScore", back_populates="match", cascade="all, delete-orphan")
+
+class TournamentSetScore(Base):
+    __tablename__ = "tournament_set_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    match_id = Column(Integer, ForeignKey("tournament_matches.id"))
+    set_number = Column(Integer)
+    player1_score = Column(Integer)
+    player2_score = Column(Integer)
+
+    match = relationship("TournamentMatch", back_populates="set_scores")
