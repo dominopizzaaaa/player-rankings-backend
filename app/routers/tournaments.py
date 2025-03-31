@@ -2,16 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
-from app.models import Tournament, TournamentPlayer, TournamentMatch, Player, TournamentSetScore, TournamentStanding
+from app.models import Tournament, TournamentPlayer, TournamentMatch, Player, TournamentSetScore, TournamentStanding, Match
 from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse, TournamentMatchResult
 from sqlalchemy.orm import selectinload, aliased
-from sqlalchemy.orm.attributes import flag_modified
 from app.database import get_db
-from sqlalchemy import delete, update, or_
+from sqlalchemy import delete, update
 from typing import List
 import random
 from collections import defaultdict
 from math import ceil, log2
+from app.elo import calculate_elo
 
 router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
 
@@ -628,6 +628,46 @@ async def submit_tournament_match_result(
         ))
 
     await db.commit()
+
+        # 🧠 Update Elo ratings and store in global Match table
+    stmt = select(Player).where(Player.id.in_([result.player1_id, result.player2_id]))
+    players = (await db.execute(stmt)).scalars().all()
+
+    if len(players) < 2:
+        raise HTTPException(status_code=400, detail="Both players must exist.")
+
+    player1, player2 = players if players[0].id == result.player1_id else players[::-1]
+
+    if result.winner_id not in [player1.id, player2.id]:
+        raise HTTPException(status_code=400, detail="Winner must be one of the players.")
+
+    # ✅ Determine outcome
+    outcome1 = 1 if result.winner_id == player1.id else 0
+    outcome2 = 1 - outcome1
+
+    # ✅ Calculate new ratings
+    new_rating1 = int(calculate_elo(player1.rating, player2.rating, outcome1, player1.matches or 0))
+    new_rating2 = int(calculate_elo(player2.rating, player1.rating, outcome2, player2.matches or 0))
+
+    # ✅ Update player stats
+    player1.rating = new_rating1
+    player2.rating = new_rating2
+    player1.matches = (player1.matches or 0) + 1
+    player2.matches = (player2.matches or 0) + 1
+
+    # ✅ Save in global Match table
+    new_match = Match(
+        player1_id=player1.id,
+        player2_id=player2.id,
+        player1_score=result.player1_score,
+        player2_score=result.player2_score,
+        winner_id=result.winner_id,
+        timestamp=datetime.now(timezone.utc)
+    )
+    db.add(new_match)
+
+    await db.commit()
+
 
     # Check if all group matches are done and KO hasn't started
     group_match_result = await db.execute(

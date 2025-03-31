@@ -1,12 +1,11 @@
-import math
+# Elo calculation function
+def calculate_elo(old_rating, opponent_rating, outcome, games_played):
+    if games_played <= 10:
+        K = 40
+    elif games_played <= 200:
+        K = 24
+    else:
+        K = 16
 
-K = 32  # Elo K-factor, can be adjusted
-
-def calculate_elo(winner_elo, loser_elo):
-    expected_winner = 1 / (1 + math.pow(10, (loser_elo - winner_elo) / 400))
-    expected_loser = 1 - expected_winner
-
-    new_winner_elo = winner_elo + K * (1 - expected_winner)
-    new_loser_elo = loser_elo + K * (0 - expected_loser)
-
-    return round(new_winner_elo), round(new_loser_elo)
+    expected_score = 1 / (1 + 10 ** ((opponent_rating - old_rating) / 400))
+    return old_rating + K * (outcome - expected_score)
