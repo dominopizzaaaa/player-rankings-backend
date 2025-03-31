@@ -446,25 +446,25 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     if not matches:
         return  # No knockout matches to process
 
-    # 2. Group matches by round (exclude "3rd Place Match" from progression logic)
+    # 2. Group matches by round
     rounds = defaultdict(list)
     for m in matches:
         if m.round != "3rd Place Match":
             rounds[m.round].append(m)
 
     def round_sort_key(name):
-        if name == "Final" or name == "Round of 2":
-            return 999
+        if name == "Final":
+            return 1
         if name == "3rd Place Match":
-            return 998
-        try:
-            return int(name.split()[-1])
-        except:
             return 0
+        try:
+            return int(name.split()[-1])  # e.g., "Round of 16" → 16
+        except:
+            return -1  # Unknown or malformed round
 
-    round_names = sorted(rounds.keys(), key=round_sort_key)
+    round_names = sorted(rounds.keys(), key=round_sort_key, reverse=True)
 
-    last_round_name = round_names[0] # chnage to [0]
+    last_round_name = round_names[-1] # chnage to [0]
     last_round_matches = rounds[last_round_name]
 
     # 3. Check if all matches in that round are completed
