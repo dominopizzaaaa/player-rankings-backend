@@ -6,14 +6,16 @@ from sqlalchemy.orm import joinedload, Session
 from sqlalchemy.inspection import inspect
 from datetime import datetime, timezone
 import logging
-
+from pytz import timezone as dt_timezone
 from app.models import Player, Match, SetScore
-from app.schemas import MatchResult, HeadToHeadResponse
+from app.schemas import MatchResult, HeadToHeadResponse, MatchResponse
 from app.database import get_db
 from app.auth import is_admin
+from typing import List
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+sgt = dt_timezone("Asia/Singapore")
 
 def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     if games_played <= 10:
@@ -56,7 +58,7 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     player2.matches = (player2.matches or 0) + 1
 
     # ✅ Create match record (with new fields)
-    timestamp = result.timestamp or datetime.now(timezone.utc)
+    timestamp = result.timestamp or datetime.now(sgt)
     # Calculate total sets won
     p1_total = sum(1 for s in result.sets if s.player1_score > s.player2_score)
     p2_total = sum(1 for s in result.sets if s.player2_score > s.player1_score)
@@ -112,27 +114,35 @@ async def get_matches(db: AsyncSession = Depends(get_db)):
     )
     matches = result.unique().scalars().all()
 
+    # Filter out bye matches (i.e. player1 or player2 is None)
+    valid_matches = [m for m in matches if m.player1 and m.player2]
+
+    # Sort by timestamp (earliest first)
+    valid_matches.sort(key=lambda m: m.timestamp or 0)
+
     return [
         {
             "id": m.id,
-            "player1": m.player1.name,
             "player1_id": m.player1.id,
-            "player2": m.player2.name,
+            "player1": m.player1.name,
             "player2_id": m.player2.id,
+            "player2": m.player2.name,
             "player1_score": m.player1_score,
             "player2_score": m.player2_score,
             "winner_id": m.winner_id,
-            "timestamp": m.timestamp,
+            "round": m.round,
+            "stage": m.stage,
+            "timestamp": m.timestamp.astimezone(sgt).strftime("%-d %b %Y, %H:%M") if m.timestamp else None,
             "set_scores": [
                 {
                     "set_number": s.set_number,
                     "player1_score": s.player1_score,
-                    "player2_score": s.player2_score,
+                    "player2_score": s.player2_score
                 }
                 for s in m.set_scores
             ]
         }
-        for m in matches
+        for m in valid_matches
     ]
 
 @router.delete("/{match_id}")
