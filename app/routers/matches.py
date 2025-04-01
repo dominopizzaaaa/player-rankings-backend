@@ -200,19 +200,8 @@ async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depe
 
 @router.get("/head-to-head", response_model=HeadToHeadResponse)
 async def head_to_head(player1_id: int, player2_id: int, db: AsyncSession = Depends(get_db)):
-    # ✅ Fetch regular matches
-    result1 = await db.execute(
-        select(Match).where(
-            or_(
-                and_(Match.player1_id == player1_id, Match.player2_id == player2_id),
-                and_(Match.player1_id == player2_id, Match.player2_id == player1_id),
-            )
-        )
-    )
-    regular_matches = result1.scalars().all()
-
-    # ✅ Fetch tournament matches with set_scores eagerly loaded
-    result2 = await db.execute(
+    # Fetch all matches between the two players, load set_scores too
+    result = await db.execute(
         select(Match)
         .options(joinedload(Match.set_scores))
         .where(
@@ -222,34 +211,23 @@ async def head_to_head(player1_id: int, player2_id: int, db: AsyncSession = Depe
             )
         )
     )
-    tournament_matches = result2.unique().scalars().all()
+    matches = result.unique().scalars().all()
 
-    # ✅ Combine and sort
-    all_matches = regular_matches + tournament_matches
-    if not all_matches:
+    if not matches:
         raise HTTPException(status_code=404, detail="No matches found between these players.")
 
-    def get_match_datetime(m):
-        dt = getattr(m, "created_at", getattr(m, "timestamp", None))
-        if dt is None:
-            return datetime(1970, 1, 1, tzinfo=timezone.utc)
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt
-
-    # ✅ Skip invalid matches
-    valid_matches = [
-        m for m in (regular_matches + tournament_matches)
-        if m.winner_id is not None and (getattr(m, "created_at", None) or getattr(m, "timestamp", None))
-    ]
+    # Filter to only completed matches with valid timestamps
+    valid_matches = [m for m in matches if m.winner_id and m.timestamp and m.player1_id and m.player2_id]
 
     if not valid_matches:
-        raise HTTPException(status_code=404, detail="No valid matches with results found between these players.")
+        raise HTTPException(status_code=404, detail="No valid matches with results.")
 
-    valid_matches.sort(key=get_match_datetime, reverse=True)
+    # Sort by most recent first
+    valid_matches.sort(key=lambda m: m.timestamp, reverse=True)
 
-    # ✅ Initialize stats
     stats = {
+        "player1_id": player1_id,
+        "player2_id": player2_id,
         "matches_played": 0,
         "player1_wins": 0,
         "player2_wins": 0,
@@ -258,63 +236,56 @@ async def head_to_head(player1_id: int, player2_id: int, db: AsyncSession = Depe
         "player1_points": 0,
         "player2_points": 0,
         "match_history": [],
-        "most_recent_winner": None
+        "most_recent_winner": None,
     }
 
     for match in valid_matches:
         stats["matches_played"] += 1
-        winner_id = match.winner_id
-        is_tournament = isinstance(match, Match)
 
-        # ✅ Count wins
-        if winner_id == player1_id:
-            stats["player1_wins"] += 1
-        elif winner_id == player2_id:
-            stats["player2_wins"] += 1
+        sets = [
+            {"player1_score": s.player1_score, "player2_score": s.player2_score}
+            for s in match.set_scores
+        ]
 
-        # ✅ Set scores
-        if is_tournament:
-            sets = [
-                {"p1": s.player1_score, "p2": s.player2_score}
-                for s in match.set_scores or []
-            ]
-        else:
-            sets = [{"p1": match.player1_score, "p2": match.player2_score}]
+        # Calculate set wins and total points
+        p1_set_wins = sum(1 for s in sets if s["player1_score"] > s["player2_score"])
+        p2_set_wins = sum(1 for s in sets if s["player2_score"] > s["player1_score"])
+        p1_points = sum(s["player1_score"] for s in sets)
+        p2_points = sum(s["player2_score"] for s in sets)
 
-        # ✅ Compute sets won & points
-        p1_sets_won = sum(1 for s in sets if s.get("p1", 0) > s.get("p2", 0))
-        p2_sets_won = sum(1 for s in sets if s.get("p2", 0) > s.get("p1", 0))
-        p1_points = sum(s.get("p1", 0) for s in sets)
-        p2_points = sum(s.get("p2", 0) for s in sets)
-
-        # ✅ Assign based on who's who in the match
+        # Determine player1/player2 from perspective
         if match.player1_id == player1_id:
-            stats["player1_sets"] += p1_sets_won
-            stats["player2_sets"] += p2_sets_won
+            stats["player1_sets"] += p1_set_wins
+            stats["player2_sets"] += p2_set_wins
             stats["player1_points"] += p1_points
             stats["player2_points"] += p2_points
         else:
-            stats["player1_sets"] += p2_sets_won
-            stats["player2_sets"] += p1_sets_won
+            stats["player1_sets"] += p2_set_wins
+            stats["player2_sets"] += p1_set_wins
             stats["player1_points"] += p2_points
             stats["player2_points"] += p1_points
 
-        # ✅ Append match to history
+        # Win counting
+        if match.winner_id == player1_id:
+            stats["player1_wins"] += 1
+        elif match.winner_id == player2_id:
+            stats["player2_wins"] += 1
+
+        # History entry
         stats["match_history"].append({
-            "date": getattr(match, "created_at", getattr(match, "timestamp", None)),
-            "tournament": is_tournament,
-            "winner_id": winner_id,
+            "date": match.timestamp,
+            "tournament": bool(match.tournament_id),
+            "winner_id": match.winner_id,
             "player1_id": match.player1_id,
             "player2_id": match.player2_id,
+            "player1_score": p1_set_wins,
+            "player2_score": p2_set_wins,
             "set_scores": sets
         })
 
-    # ✅ Win percentages
     total = stats["matches_played"]
     stats["player1_win_percentage"] = round((stats["player1_wins"] / total) * 100, 2)
     stats["player2_win_percentage"] = round((stats["player2_wins"] / total) * 100, 2)
     stats["most_recent_winner"] = stats["match_history"][0]["winner_id"]
-    stats["player1_id"] = player1_id
-    stats["player2_id"] = player2_id
 
     return stats

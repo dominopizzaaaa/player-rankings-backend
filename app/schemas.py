@@ -115,6 +115,8 @@ class MatchHistoryEntry(BaseModel):
     winner_id: int
     player1_id: int
     player2_id: int
+    player1_score: int  # ✅ add this
+    player2_score: int  # ✅ add this
     set_scores: Optional[List[dict]] = []
 
 class HeadToHeadResponse(BaseModel):
