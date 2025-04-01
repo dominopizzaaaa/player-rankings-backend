@@ -12,11 +12,12 @@ import random
 from collections import defaultdict
 from math import ceil, log2
 from app.elo import calculate_elo
+from app.auth import is_admin
 
 router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
 
 @router.post("/", response_model=dict)
-async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Depends(get_db), admin=True):
+async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     def next_power_of_two(n: int) -> int:
         power = 1
         while power < n:
@@ -721,11 +722,7 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     print(f"✅ Created {next_round_name} with {len(winners)} players")
 
 @router.post("/matches/{match_id}/result")
-async def submit_tournament_match_result(
-    match_id: int,
-    result: MatchResult,
-    db: AsyncSession = Depends(get_db)
-):
+async def submit_tournament_match_result(match_id: int, result: MatchResult, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     # Select tournament_id, stage, round without triggering lazy load
     match_query = await db.execute(
         select(
@@ -832,7 +829,7 @@ async def submit_tournament_match_result(
     return {"message": "Tournament match result recorded"}
 
 @router.post("/{tournament_id}/reset")
-async def reset_tournament(tournament_id: int, db: AsyncSession = Depends(get_db)):
+async def reset_tournament(tournament_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     # Check tournament exists
     tournament = await db.get(Tournament, tournament_id)
     if not tournament:
@@ -868,22 +865,8 @@ async def reset_tournament(tournament_id: int, db: AsyncSession = Depends(get_db
     await db.commit()
     return {"message": f"Tournament {tournament_id} reset and matches regenerated"}
 
-@router.post("/{tournament_id}/generate-ko")
-async def force_generate_ko(tournament_id: int, db: AsyncSession = Depends(get_db)):
-    tournament = await db.get(Tournament, tournament_id)
-    if not tournament:
-        raise HTTPException(status_code=404, detail="Tournament not found")
-
-    await generate_knockout_stage_matches(tournament, db)
-    return {"message": f"KO generated for tournament {tournament_id}"}
-
-@router.post("/{tournament_id}/advance-knockout")
-async def trigger_knockout_advancement(tournament_id: int, db: AsyncSession = Depends(get_db)):
-    await advance_knockout_rounds(tournament_id, db)
-    return {"message": "Knockout advancement executed"}
-
 @router.delete("/{tournament_id}")
-async def delete_tournament(tournament_id: int, db: AsyncSession = Depends(get_db), admin=True):
+async def delete_tournament(tournament_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     from sqlalchemy import delete
 
     # Get tournament
@@ -912,3 +895,17 @@ async def delete_tournament(tournament_id: int, db: AsyncSession = Depends(get_d
     await db.commit()
 
     return {"message": f"Tournament {tournament_id} and its matches were deleted successfully."}
+
+@router.post("/{tournament_id}/generate-ko")
+async def force_generate_ko(tournament_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
+    tournament = await db.get(Tournament, tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    await generate_knockout_stage_matches(tournament, db)
+    return {"message": f"KO generated for tournament {tournament_id}"}
+
+@router.post("/{tournament_id}/advance-knockout")
+async def trigger_knockout_advancement(tournament_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
+    await advance_knockout_rounds(tournament_id, db)
+    return {"message": "Knockout advancement executed"}

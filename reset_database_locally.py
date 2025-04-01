@@ -43,7 +43,7 @@ async def drop_and_recreate_all_tables():
         print("👤 Adding demo players...")
         demo_names = ["Alpha", "Bravo", "Charlie", "Delta"]
         for name in demo_names:
-            session.add(Player(name=name, rating=1000, matches=0))
+            session.add(Player(name=name, rating=1500, matches=0))
         await session.commit()
         print("✅ Demo players inserted.")
 

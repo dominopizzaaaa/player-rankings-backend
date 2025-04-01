@@ -29,7 +29,7 @@ def calculate_elo(old_rating, opponent_rating, outcome, games_played):
     return old_rating + K * (outcome - expected_score)
 
 @router.post("/")
-async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
+async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     logger.info("Received match submission: %s", result.dict())
 
     stmt = select(Player).where(Player.id.in_([result.player1_id, result.player2_id]))
@@ -163,7 +163,7 @@ async def delete_match(match_id: int, db: AsyncSession = Depends(get_db), admin=
     return {"message": f"Match {match_id} deleted successfully."}
 
 @router.patch("/{match_id}")
-async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depends(get_db), admin=True):
+async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     result = await db.execute(select(Match).where(Match.id == match_id))
     match = result.scalars().first()
 

@@ -75,7 +75,7 @@ async def get_player(player_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Internal Server Error")
     
 @router.delete("/{player_id}")
-async def delete_player(player_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_player(player_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
     result = await db.execute(select(Player).where(Player.id == player_id))
     player = result.scalars().first()
 
