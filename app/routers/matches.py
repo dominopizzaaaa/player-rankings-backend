@@ -2,16 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import joinedload, Session
+from sqlalchemy.orm import joinedload
 from sqlalchemy.inspection import inspect
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 from pytz import timezone as dt_timezone
 from app.models import Player, Match, SetScore
-from app.schemas import MatchResult, HeadToHeadResponse, MatchResponse
+from app.schemas import MatchResult, HeadToHeadResponse
 from app.database import get_db
 from app.auth import is_admin
-from typing import List
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
