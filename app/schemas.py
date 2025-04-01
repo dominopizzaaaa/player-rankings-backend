@@ -16,20 +16,40 @@ class PlayerCreate(BaseModel):
     age: Optional[int] = None
     gender: Optional[str] = None
 
+class SetScore(BaseModel):
+    set_number: int
+    player1_score: int
+    player2_score: int
+
 class MatchResult(BaseModel):
     player1_id: int
     player2_id: int
     player1_score: int
     player2_score: int
     winner_id: int
+    timestamp: Optional[datetime] = None
+    sets: Optional[List[SetScore]] = []
+    tournament_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
 
 class MatchResponse(BaseModel):
-    player1: str
-    new_rating1: int
-    games_played_p1: int
-    player2: str
-    new_rating2: int
-    games_played_p2: int
+    id: int
+    player1_id: int
+    player2_id: Optional[int]
+    player1_name: str
+    player2_name: Optional[str]
+    player1_score: Optional[int]
+    player2_score: Optional[int]
+    winner_id: Optional[int]
+    round: Optional[str]
+    stage: Optional[str]
+    set_scores: Optional[List[List[int]]]
+    timestamp: Optional[datetime] = None  # ✅ new field
+
+    class Config:
+        from_attributes = True
 
 class GroupingMode(str, Enum):
     ranked = "ranked"
@@ -56,22 +76,6 @@ class TournamentResponse(BaseModel):
     class Config:
         orm_mode = True
 
-class TournamentMatchResponse(BaseModel):
-    id: int
-    player1_id: int
-    player2_id: Optional[int]
-    player1_name: str
-    player2_name: Optional[str]
-    player1_score: Optional[int]
-    player2_score: Optional[int]
-    winner_id: Optional[int]
-    round: str
-    stage: str
-    set_scores: Optional[List[List[int]]] = []  # ✅ must be here
-
-    class Config:
-        from_attributes = True
-
 class GroupMatrixEntry(BaseModel):
     winner: int
     score: str
@@ -85,10 +89,10 @@ class TournamentDetailsResponse(BaseModel):
     num_groups: int
     knockout_size: int
     created_at: datetime
-    group_matches: List[TournamentMatchResponse]
-    knockout_matches: List[TournamentMatchResponse]
-    individual_matches: List[TournamentMatchResponse]
-    knockout_bracket: dict[str, list[TournamentMatchResponse]] = {}
+    group_matches: List[MatchResponse]
+    knockout_matches: List[MatchResponse]
+    individual_matches: List[MatchResponse]
+    knockout_bracket: dict[str, list[MatchResponse]] = {}
     final_standings: dict[str, int] = {}
     group_matrix: Optional[Dict[str, Any]] = None
 
@@ -104,22 +108,6 @@ class MatchInfo(BaseModel):
     winner_id: Optional[int]
     round: int
     stage: str
-
-class SetScore(BaseModel):
-    set_number: int
-    player1_score: int
-    player2_score: int
-
-class TournamentMatchResult(BaseModel):
-    player1_id: int
-    player2_id: int
-    player1_score: int  # ✅ Added
-    player2_score: int  # ✅ Added
-    winner_id: int
-    sets: List[SetScore]  # variable number of sets
-
-    class Config:
-        from_attributes = True
 
 class MatchHistoryEntry(BaseModel):
     date: datetime

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload, Session
@@ -7,7 +7,7 @@ from sqlalchemy.inspection import inspect
 from datetime import datetime, timezone
 import logging
 
-from app.models import Player, Match, TournamentMatch
+from app.models import Player, Match, SetScore
 from app.schemas import MatchResult, HeadToHeadResponse
 from app.database import get_db
 from app.auth import is_admin
@@ -55,16 +55,32 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
     player1.matches = (player1.matches or 0) + 1
     player2.matches = (player2.matches or 0) + 1
 
-    # ✅ Create match record
+    # ✅ Create match record (with new fields)
+    timestamp = result.timestamp or datetime.now(timezone.utc)
+    # Calculate total sets won
+    p1_total = sum(1 for s in result.sets if s.player1_score > s.player2_score)
+    p2_total = sum(1 for s in result.sets if s.player2_score > s.player1_score)
+
     new_match = Match(
         player1_id=player1.id,
         player2_id=player2.id,
-        player1_score=result.player1_score,
-        player2_score=result.player2_score,
+        player1_score=p1_total,
+        player2_score=p2_total,
         winner_id=result.winner_id,
-        timestamp=datetime.now(timezone.utc)
+        timestamp=timestamp,
     )
+
     db.add(new_match)
+
+    # ✅ Add set scores
+    await db.flush()  # Ensure match.id is available
+    for s in result.sets:
+        db.add(SetScore(
+            match_id=new_match.id,
+            set_number=s.set_number,
+            player1_score=s.player1_score,
+            player2_score=s.player2_score,
+        ))
 
     try:
         await db.commit()
@@ -87,9 +103,14 @@ async def submit_match(result: MatchResult, db: AsyncSession = Depends(get_db)):
 async def get_matches(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Match)
-        .options(joinedload(Match.player1), joinedload(Match.player2), joinedload(Match.match_winner))
+        .options(
+            joinedload(Match.player1),
+            joinedload(Match.player2),
+            joinedload(Match.match_winner),
+            joinedload(Match.set_scores),
+        )
     )
-    matches = result.scalars().all()
+    matches = result.unique().scalars().all()
 
     return [
         {
@@ -101,7 +122,15 @@ async def get_matches(db: AsyncSession = Depends(get_db)):
             "player1_score": m.player1_score,
             "player2_score": m.player2_score,
             "winner_id": m.winner_id,
-            "timestamp": m.timestamp
+            "timestamp": m.timestamp,
+            "set_scores": [
+                {
+                    "set_number": s.set_number,
+                    "player1_score": s.player1_score,
+                    "player2_score": s.player2_score,
+                }
+                for s in m.set_scores
+            ]
         }
         for m in matches
     ]
@@ -125,22 +154,35 @@ async def delete_match(match_id: int, db: AsyncSession = Depends(get_db), admin=
 
 @router.patch("/{match_id}")
 async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depends(get_db), admin=True):
-    # ✅ Fetch the match asynchronously
     result = await db.execute(select(Match).where(Match.id == match_id))
     match = result.scalars().first()
 
     if not match:
         raise HTTPException(status_code=404, detail="Match not found.")
 
-    # ✅ Only allow updates to actual columns (avoid triggering relationships)
+    # ✅ Update match columns
     column_keys = {column.key for column in inspect(Match).mapper.column_attrs}
-
     for key, value in update_data.items():
         if key in column_keys and value is not None:
             setattr(match, key, value)
 
+    # ✅ If sets are provided, update them
+    if "sets" in update_data and isinstance(update_data["sets"], list):
+        # Delete old sets
+        await db.execute(delete(SetScore).where(SetScore.match_id == match.id))
+
+        # Add new sets
+        for s in update_data["sets"]:
+            db.add(SetScore(
+                match_id=match.id,
+                set_number=s["set_number"],
+                player1_score=s["player1_score"],
+                player2_score=s["player2_score"],
+            ))
+
     await db.commit()
     await db.refresh(match)
+
     return {
         "message": f"Match {match_id} updated successfully.",
         "updated_data": update_data,
@@ -161,12 +203,12 @@ async def head_to_head(player1_id: int, player2_id: int, db: AsyncSession = Depe
 
     # ✅ Fetch tournament matches with set_scores eagerly loaded
     result2 = await db.execute(
-        select(TournamentMatch)
-        .options(joinedload(TournamentMatch.set_scores))
+        select(Match)
+        .options(joinedload(Match.set_scores))
         .where(
             or_(
-                and_(TournamentMatch.player1_id == player1_id, TournamentMatch.player2_id == player2_id),
-                and_(TournamentMatch.player1_id == player2_id, TournamentMatch.player2_id == player1_id),
+                and_(Match.player1_id == player1_id, Match.player2_id == player2_id),
+                and_(Match.player1_id == player2_id, Match.player2_id == player1_id),
             )
         )
     )
@@ -212,7 +254,7 @@ async def head_to_head(player1_id: int, player2_id: int, db: AsyncSession = Depe
     for match in valid_matches:
         stats["matches_played"] += 1
         winner_id = match.winner_id
-        is_tournament = isinstance(match, TournamentMatch)
+        is_tournament = isinstance(match, Match)
 
         # ✅ Count wins
         if winner_id == player1_id:

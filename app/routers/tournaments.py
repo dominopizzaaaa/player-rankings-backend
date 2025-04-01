@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
-from app.models import Tournament, TournamentPlayer, TournamentMatch, Player, TournamentSetScore, TournamentStanding, Match
-from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, TournamentMatchResponse, TournamentMatchResult
+from app.models import Tournament, TournamentPlayer, Player, SetScore, TournamentStanding, Match
+from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, MatchResponse, MatchResult
 from sqlalchemy.orm import selectinload, aliased
 from app.database import get_db
 from sqlalchemy import delete, update
@@ -131,28 +131,28 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     # 🏓 Fetch matches
     match_query = (
         select(
-            TournamentMatch.id,
-            TournamentMatch.tournament_id,
-            TournamentMatch.player1_id,
-            TournamentMatch.player2_id,
+            Match.id,
+            Match.tournament_id,
+            Match.player1_id,
+            Match.player2_id,
             Player1.name.label("player1_name"),
             Player2.name.label("player2_name"),
-            TournamentMatch.player1_score,
-            TournamentMatch.player2_score,
-            TournamentMatch.winner_id,
-            TournamentMatch.round,
-            TournamentMatch.stage,
+            Match.player1_score,
+            Match.player2_score,
+            Match.winner_id,
+            Match.round,
+            Match.stage,
         )
-        .outerjoin(Player1, TournamentMatch.player1_id == Player1.id)
-        .outerjoin(Player2, TournamentMatch.player2_id == Player2.id)
-        .where(TournamentMatch.tournament_id == tournament_id)
+        .outerjoin(Player1, Match.player1_id == Player1.id)
+        .outerjoin(Player2, Match.player2_id == Player2.id)
+        .where(Match.tournament_id == tournament_id)
     )
     result = await db.execute(match_query)
     matches = result.all()
 
     match_ids = [m.id for m in matches]
     score_results = await db.execute(
-        select(TournamentSetScore).where(TournamentSetScore.match_id.in_(match_ids))
+        select(SetScore).where(SetScore.match_id.in_(match_ids))
     )
     set_scores_by_match = {}
     for s in score_results.scalars().all():
@@ -163,7 +163,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
     group_player_set = set()
 
     for match in matches:
-        match_obj = TournamentMatchResponse(
+        match_obj = MatchResponse(
             id=match.id,
             player1_id=match.player1_id,
             player2_id=match.player2_id,
@@ -302,7 +302,7 @@ async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
     for group_number, player_ids in groups.items():
         for i in range(len(player_ids)):
             for j in range(i + 1, len(player_ids)):
-                db.add(TournamentMatch(
+                db.add(Match(
                     tournament_id=tournament_id,
                     player1_id=player_ids[i],
                     player2_id=player_ids[j],
@@ -341,9 +341,9 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
             group_map[p.group_number].append(p.player_id)
 
         result = await db.execute(
-            select(TournamentMatch)
-            .where(TournamentMatch.tournament_id == tournament.id)
-            .where(TournamentMatch.stage == "group")
+            select(Match)
+            .where(Match.tournament_id == tournament.id)
+            .where(Match.stage == "group")
         )
         group_matches = result.scalars().all()
 
@@ -359,7 +359,7 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
                 # First, fetch set scores for all group matches
         match_ids = [m.id for m in group_matches]
         set_score_result = await db.execute(
-            select(TournamentSetScore).where(TournamentSetScore.match_id.in_(match_ids))
+            select(SetScore).where(SetScore.match_id.in_(match_ids))
         )
         set_scores_by_match = defaultdict(list)
         for s in set_score_result.scalars().all():
@@ -435,7 +435,7 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
 
     # Give free pass to top players
     for pid in seeded:
-        db.add(TournamentMatch(
+        db.add(Match(
             tournament_id=tournament.id,
             player1_id=pid,
             player2_id=None,
@@ -452,7 +452,7 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
         p2 = rest[i + 1] if i + 1 < len(rest) else None
         if p2 is None:
             # Odd one out gets a bye
-            db.add(TournamentMatch(
+            db.add(Match(
                 tournament_id=tournament.id,
                 player1_id=p1,
                 player2_id=None,
@@ -463,7 +463,7 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
                 stage="knockout"
             ))
         else:
-            db.add(TournamentMatch(
+            db.add(Match(
                 tournament_id=tournament.id,
                 player1_id=p1,
                 player2_id=p2,
@@ -487,16 +487,16 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     # 1. Get all knockout matches
     result = await db.execute(
         select(
-            TournamentMatch.id,
-            TournamentMatch.player1_id,
-            TournamentMatch.player2_id,
-            TournamentMatch.winner_id,
-            TournamentMatch.round,
-            TournamentMatch.stage
+            Match.id,
+            Match.player1_id,
+            Match.player2_id,
+            Match.winner_id,
+            Match.round,
+            Match.stage
         ).where(
-            TournamentMatch.tournament_id == tournament_id,
-            TournamentMatch.stage == "knockout"
-        ).order_by(TournamentMatch.round)
+            Match.tournament_id == tournament_id,
+            Match.stage == "knockout"
+        ).order_by(Match.round)
     )
     matches = result.all()
 
@@ -535,13 +535,13 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
             for m in last_round_matches
         ]
         existing_3rd_match = await db.execute(
-            select(TournamentMatch).where(
-                TournamentMatch.tournament_id == tournament_id,
-                TournamentMatch.round == "3rd Place Match"
+            select(Match).where(
+                Match.tournament_id == tournament_id,
+                Match.round == "3rd Place Match"
             )
         )
         if not existing_3rd_match.scalars().first() and len(semi_losers) == 2:
-            db.add(TournamentMatch(
+            db.add(Match(
                 tournament_id=tournament_id,
                 player1_id=semi_losers[0],
                 player2_id=semi_losers[1],
@@ -563,12 +563,12 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         # Check if 3rd place match exists and is complete
         third_place_result = await db.execute(
             select(
-                TournamentMatch.player1_id,
-                TournamentMatch.player2_id,
-                TournamentMatch.winner_id
+                Match.player1_id,
+                Match.player2_id,
+                Match.winner_id
             ).where(
-                TournamentMatch.tournament_id == tournament_id,
-                TournamentMatch.round == "3rd Place Match"
+                Match.tournament_id == tournament_id,
+                Match.round == "3rd Place Match"
             )
         )
         third_match = third_place_result.first()
@@ -603,10 +603,10 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
 
     # 🔒 Avoid duplicate next round
     existing_next_round = await db.execute(
-        select(TournamentMatch).where(
-            TournamentMatch.tournament_id == tournament_id,
-            TournamentMatch.round == next_round_name,
-            TournamentMatch.stage == "knockout"
+        select(Match).where(
+            Match.tournament_id == tournament_id,
+            Match.round == next_round_name,
+            Match.stage == "knockout"
         )
     )
     existing_next_round_matches = existing_next_round.scalars().all()
@@ -619,7 +619,7 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         p1 = winners[i]
         p2 = winners[i + 1] if i + 1 < len(winners) else None
 
-        match = TournamentMatch(
+        match = Match(
             tournament_id=tournament_id,
             player1_id=p1,
             player2_id=p2,
@@ -636,19 +636,19 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
 @router.post("/matches/{match_id}/result")
 async def submit_tournament_match_result(
     match_id: int,
-    result: TournamentMatchResult,
+    result: MatchResult,
     db: AsyncSession = Depends(get_db)
 ):
     # Select tournament_id, stage, round without triggering lazy load
     match_query = await db.execute(
         select(
-            TournamentMatch.id,
-            TournamentMatch.tournament_id,
-            TournamentMatch.stage,
-            TournamentMatch.round,
-            TournamentMatch.player1_id,
-            TournamentMatch.player2_id
-        ).where(TournamentMatch.id == match_id)
+            Match.id,
+            Match.tournament_id,
+            Match.stage,
+            Match.round,
+            Match.player1_id,
+            Match.player2_id
+        ).where(Match.id == match_id)
     )
     match_info = match_query.first()
 
@@ -659,8 +659,8 @@ async def submit_tournament_match_result(
 
     # Update match scores and winner
     await db.execute(
-        update(TournamentMatch)
-        .where(TournamentMatch.id == match_id)
+        update(Match)
+        .where(Match.id == match_id)
         .values(
             player1_id=result.player1_id,
             player2_id=result.player2_id,
@@ -672,12 +672,12 @@ async def submit_tournament_match_result(
 
     # Delete old set scores
     await db.execute(
-        delete(TournamentSetScore).where(TournamentSetScore.match_id == match_id)
+        delete(SetScore).where(SetScore.match_id == match_id)
     )
 
     # Add new set scores
     for s in result.sets:
-        db.add(TournamentSetScore(
+        db.add(SetScore(
             match_id=match_id,
             set_number=s.set_number,
             player1_score=s.player1_score,
@@ -728,9 +728,9 @@ async def submit_tournament_match_result(
 
     # Check if all group matches are done and KO hasn't started
     group_match_result = await db.execute(
-        select(TournamentMatch)
-        .where(TournamentMatch.tournament_id == tournament_id)
-        .where(TournamentMatch.stage == "group")
+        select(Match)
+        .where(Match.tournament_id == tournament_id)
+        .where(Match.stage == "group")
     )
     group_matches = group_match_result.scalars().all()
     all_group_complete = all(m.winner_id is not None for m in group_matches)
@@ -740,9 +740,9 @@ async def submit_tournament_match_result(
 
     # Check if knockout matches already exist
     knockout_result = await db.execute(
-        select(TournamentMatch)
-        .where(TournamentMatch.tournament_id == tournament_id)
-        .where(TournamentMatch.stage == "knockout")
+        select(Match)
+        .where(Match.tournament_id == tournament_id)
+        .where(Match.stage == "knockout")
     )
     knockout_exists = len(knockout_result.scalars().all()) > 0
 
@@ -766,16 +766,16 @@ async def reset_tournament(tournament_id: int, db: AsyncSession = Depends(get_db
 
     # Delete all set scores
     await db.execute(
-        delete(TournamentSetScore).where(
-            TournamentSetScore.match_id.in_(
-                select(TournamentMatch.id).where(TournamentMatch.tournament_id == tournament_id)
+        delete(SetScore).where(
+            SetScore.match_id.in_(
+                select(Match.id).where(Match.tournament_id == tournament_id)
             )
         )
     )
 
     # Delete all tournament matches
     await db.execute(
-        delete(TournamentMatch).where(TournamentMatch.tournament_id == tournament_id)
+        delete(Match).where(Match.tournament_id == tournament_id)
     )
 
     # Delete all final standings
@@ -817,17 +817,17 @@ async def delete_tournament(tournament_id: int, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=404, detail="Tournament not found")
 
     # Step 1: Get all matches for this tournament
-    matches_result = await db.execute(select(TournamentMatch).where(TournamentMatch.tournament_id == tournament_id))
+    matches_result = await db.execute(select(Match).where(Match.tournament_id == tournament_id))
     matches = matches_result.scalars().all()
 
     match_ids = [match.id for match in matches]
     
     # Step 2: Delete set scores first (if any)
     if match_ids:
-        await db.execute(delete(TournamentSetScore).where(TournamentSetScore.match_id.in_(match_ids)))
+        await db.execute(delete(SetScore).where(SetScore.match_id.in_(match_ids)))
 
     # Step 3: Delete the matches
-    await db.execute(delete(TournamentMatch).where(TournamentMatch.tournament_id == tournament_id))
+    await db.execute(delete(Match).where(Match.tournament_id == tournament_id))
 
     # Step 4: Delete the tournament
     await db.delete(tournament)
