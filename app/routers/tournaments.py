@@ -75,7 +75,10 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
 async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Tournament)
-        .options(selectinload(Tournament.players))
+        .options(
+            selectinload(Tournament.players),
+            selectinload(Tournament.standings)
+        )
         .order_by(Tournament.date.desc())
     )
     tournaments = result.scalars().all()
@@ -83,6 +86,8 @@ async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
     response = []
     for t in tournaments:
         player_ids = [tp.player_id for tp in t.players]
+        standings_dict = {str(s.position): s.player_id for s in t.standings}
+
         response.append(TournamentResponse(
             id=t.id,
             name=t.name,
@@ -92,19 +97,29 @@ async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
             knockout_size=t.knockout_size,
             players_advance_per_group=t.players_advance_per_group,
             created_at=t.created_at,
-            player_ids=player_ids
+            player_ids=player_ids,
+            final_standings=standings_dict
         ))
 
     return response
 
 @router.get("/{tournament_id}", response_model=TournamentResponse)
 async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Tournament).where(Tournament.id == tournament_id))
+    result = await db.execute(
+        select(Tournament)
+        .options(
+            selectinload(Tournament.players),
+            selectinload(Tournament.standings)
+        )
+        .where(Tournament.id == tournament_id)
+    )
     tournament = result.scalars().first()
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found.")
     
     player_ids = [tp.player_id for tp in tournament.players]
+    standings_dict = {str(s.position): s.player_id for s in tournament.standings}
+
     return TournamentResponse(
         id=tournament.id,
         name=tournament.name,
@@ -113,7 +128,9 @@ async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db))
         num_groups=tournament.num_groups,
         knockout_size=tournament.knockout_size,
         created_at=tournament.created_at,
-        player_ids=player_ids
+        player_ids=player_ids,
+        players_advance_per_group=tournament.players_advance_per_group,
+        final_standings=standings_dict
     )
 
 @router.get("/{tournament_id}/details", response_model=TournamentDetailsResponse)
@@ -312,195 +329,161 @@ async def generate_group_stage_matches(tournament_id: int, db: AsyncSession):
                 ))
     await db.commit()
 
+def generate_bracket_seeds(n):
+    if n == 1:
+        return [1]
+    prev = generate_bracket_seeds(n // 2)
+    return [x for pair in zip(prev, [n + 1 - x for x in prev]) for x in pair]
+
 async def generate_knockout_stage_matches(tournament: Tournament, db):
-    print("🧠 Starting KO generation for", tournament.id)
+    if tournament.num_groups == 0:
+        print(f"⚡️ Delegating to KO generation without group stage for tournament {tournament.id}")
+        return await generate_knockout_stage_matches_without_grp_stage(tournament, db)
 
     players_advancing = []
+    result = await db.execute(
+        select(TournamentPlayer).where(TournamentPlayer.tournament_id == tournament.id)
+    )
+    players = result.scalars().all()
+
+    group_map = defaultdict(list)
+    player_to_group = {}
+    for p in players:
+        group_map[p.group_number].append(p.player_id)
+        player_to_group[p.player_id] = p.group_number
+
+    result = await db.execute(
+        select(Match)
+        .where(Match.tournament_id == tournament.id)
+        .where(Match.stage == "group")
+    )
+    group_matches = result.scalars().all()
+
+    player_stats = defaultdict(lambda: {
+        "wins": 0,
+        "set_wins": 0,
+        "set_losses": 0,
+        "points_won": 0,
+        "points_lost": 0,
+    })
+
+    match_ids = [m.id for m in group_matches]
+    set_score_result = await db.execute(
+        select(SetScore).where(SetScore.match_id.in_(match_ids))
+    )
+    set_scores_by_match = defaultdict(list)
+    for s in set_score_result.scalars().all():
+        set_scores_by_match[s.match_id].append([s.player1_score, s.player2_score])
+
+    for m in group_matches:
+        if m.winner_id is None:
+            continue
+        p1, p2 = m.player1_id, m.player2_id
+        if m.winner_id == p1:
+            player_stats[p1]["wins"] += 1
+        else:
+            player_stats[p2]["wins"] += 1
+
+        set_scores = set_scores_by_match.get(m.id, [])
+        for s in set_scores:
+            player_stats[p1]["set_wins"] += int(s[0] > s[1])
+            player_stats[p1]["set_losses"] += int(s[0] < s[1])
+            player_stats[p2]["set_wins"] += int(s[1] > s[0])
+            player_stats[p2]["set_losses"] += int(s[1] < s[0])
+            player_stats[p1]["points_won"] += s[0]
+            player_stats[p1]["points_lost"] += s[1]
+            player_stats[p2]["points_won"] += s[1]
+            player_stats[p2]["points_lost"] += s[0]
+
+    def sort_key(pid):
+        stats = player_stats[pid]
+        return (
+            -stats["wins"],
+            -(stats["set_wins"] - stats["set_losses"]),
+            -(stats["points_won"] - stats["points_lost"])
+        )
+
     group_rankings = {}
+    for group_num, pids in group_map.items():
+        ranked = sorted(pids, key=sort_key)
+        group_rankings[group_num] = ranked
 
-    if tournament.num_groups == 0:
-        # ✅ All players go to knockout, seed by Elo
-        result = await db.execute(
-            select(TournamentPlayer.player_id).where(TournamentPlayer.tournament_id == tournament.id)
-        )
-        player_ids = [r[0] for r in result.all()]
-
-        elo_result = await db.execute(
-            select(Player.id, Player.rating).where(Player.id.in_(player_ids))
-        )
-        ratings = dict(elo_result.all())
-        players_advancing = sorted(player_ids, key=lambda pid: -ratings.get(pid, 0))
-
-        num_players = len(players_advancing)
-        ko_size = 2 ** ceil(log2(num_players))
-        num_byes = ko_size - num_players
-
-        print(f"🔢 [KO Only] {num_players} players advancing → KO size: {ko_size}, byes: {num_byes}")
-
-        seeded = players_advancing[:num_byes]
-        rest = players_advancing[num_byes:]
-        random.shuffle(rest)
-
-        for pid in seeded:
-            db.add(Match(
-                tournament_id=tournament.id,
-                player1_id=pid,
-                player2_id=None,
-                winner_id=pid,
-                player1_score=1,
-                player2_score=0,
-                round=f"Round of {ko_size}",
-                stage="knockout"
-            ))
-
-        for i in range(0, len(rest), 2):
-            p1 = rest[i]
-            p2 = rest[i + 1] if i + 1 < len(rest) else None
-            if p2 is None:
-                db.add(Match(
-                    tournament_id=tournament.id,
-                    player1_id=p1,
-                    player2_id=None,
-                    winner_id=p1,
-                    player1_score=1,
-                    player2_score=0,
-                    round=f"Round of {ko_size}",
-                    stage="knockout"
-                ))
-            else:
-                db.add(Match(
-                    tournament_id=tournament.id,
-                    player1_id=p1,
-                    player2_id=p2,
-                    round=f"Round of {ko_size}",
-                    stage="knockout"
-                ))
-
-        await db.commit()
-        return  # ✅ Return early to avoid running group-based logic below
-
-    else:
-        # ✅ Pick top X from each group
-        result = await db.execute(
-            select(TournamentPlayer).where(TournamentPlayer.tournament_id == tournament.id)
-        )
-        players = result.scalars().all()
-
-        group_map = defaultdict(list)
-        for p in players:
-            group_map[p.group_number].append(p.player_id)
-
-        result = await db.execute(
-            select(Match)
-            .where(Match.tournament_id == tournament.id)
-            .where(Match.stage == "group")
-        )
-        group_matches = result.scalars().all()
-
-        # 🧠 Reuse group ranking logic here
-        player_stats = defaultdict(lambda: {
-            "wins": 0,
-            "set_wins": 0,
-            "set_losses": 0,
-            "points_won": 0,
-            "points_lost": 0,
-        })
-
-                # First, fetch set scores for all group matches
-        match_ids = [m.id for m in group_matches]
-        set_score_result = await db.execute(
-            select(SetScore).where(SetScore.match_id.in_(match_ids))
-        )
-        set_scores_by_match = defaultdict(list)
-        for s in set_score_result.scalars().all():
-            set_scores_by_match[s.match_id].append([s.player1_score, s.player2_score])
-
-        # Now process matches and compute stats
-        for m in group_matches:
-            if m.winner_id is None:
-                continue
-            p1, p2 = m.player1_id, m.player2_id
-            if m.winner_id == p1:
-                player_stats[p1]["wins"] += 1
-            else:
-                player_stats[p2]["wins"] += 1
-
-            set_scores = set_scores_by_match.get(m.id, [])
-            for s in set_scores:
-                player_stats[p1]["set_wins"] += int(s[0] > s[1])
-                player_stats[p1]["set_losses"] += int(s[0] < s[1])
-                player_stats[p2]["set_wins"] += int(s[1] > s[0])
-                player_stats[p2]["set_losses"] += int(s[1] < s[0])
-                player_stats[p1]["points_won"] += s[0]
-                player_stats[p1]["points_lost"] += s[1]
-                player_stats[p2]["points_won"] += s[1]
-                player_stats[p2]["points_lost"] += s[0]
-
-        # Use point differential: points won - points lost
-        def sort_key(pid):
-            stats = player_stats[pid]
-            return (
-                -stats["wins"],                             # 1. Wins
-                -(stats["set_wins"] - stats["set_losses"]), # 2. Set difference
-                -(stats["points_won"] - stats["points_lost"]) # 3. Point difference ✅ fixed
-            )
-
-        for group_num, pids in group_map.items():
-            ranked = sorted(pids, key=sort_key)
-            group_rankings[group_num] = ranked
-
-        for group_num in sorted(group_rankings.keys()):
-            ranked = group_rankings[group_num]
-            top_n = ranked[:tournament.players_advance_per_group]
-            players_advancing.extend(top_n)
+    for group_num in sorted(group_rankings.keys()):
+        ranked = group_rankings[group_num]
+        top_n = ranked[:tournament.players_advance_per_group]
+        players_advancing.extend(top_n)
 
     num_players = len(players_advancing)
     ko_size = 2 ** ceil(log2(num_players))
     num_byes = ko_size - num_players
 
-    print(f"🔢 {num_players} players advancing → KO size: {ko_size}, byes: {num_byes}")
+    print(f"🔣 {num_players} players advancing → KO size: {ko_size}, byes: {num_byes}")
 
     advance_count = tournament.players_advance_per_group
-
-    # Collect ranked players from each group into buckets by rank
     rank_buckets = defaultdict(list)
 
     for group_num, ranked in group_rankings.items():
         for i in range(min(advance_count, len(ranked))):
-            rank_buckets[i].append(ranked[i])  # i = 0 means 1st place, etc.
+            rank_buckets[i].append(ranked[i])
 
-    # Create final list by merging sorted buckets
     players_advancing = []
     for i in range(advance_count):
         tier = sorted(rank_buckets[i], key=sort_key)
         players_advancing.extend(tier)
 
-    seeded = players_advancing[:num_byes]
-    rest = players_advancing[num_byes:]
-    random.shuffle(rest)
+    total_slots = ko_size
+    seeding_to_player = {}
 
-    matches = []
+    bye_positions = []  # positions to assign byes
 
-    # Give free pass to top players
-    for pid in seeded:
-        db.add(Match(
-            tournament_id=tournament.id,
-            player1_id=pid,
-            player2_id=None,
-            winner_id=pid,
-            player1_score=1,
-            player2_score=0,
-            round=f"Round of {ko_size}",
-            stage="knockout"
-        ))
+    # Generate bracket seeds: [1, 8, 4, 5, 2, 7, 3, 6] for 8 players
+    seeds = generate_bracket_seeds(ko_size)
 
-    # Pair the remaining players
-    for i in range(0, len(rest), 2):
-        p1 = rest[i]
-        p2 = rest[i + 1] if i + 1 < len(rest) else None
-        if p2 is None:
-            # Odd one out gets a bye
-            db.add(Match(
+    # Determine bye positions: opponent slots of top N seeds
+    for i in range(num_byes):
+        top_seed = seeds[i]  # take the i-th best seed
+        idx = top_seed - 1
+        opponent_idx = idx + 1 if idx % 2 == 0 else idx - 1  # pair index
+        if 0 <= opponent_idx < len(seeds):
+            bye_positions.append(opponent_idx) # change to opponent_idx
+
+    # Fill players and assign byes to correct opponent seeds
+    seeding_to_player = {}
+    pi = 0
+    for seed in seeds:
+        position = seed - 1
+        if position in bye_positions:
+            seeding_to_player[position] = None
+        else:
+            seeding_to_player[position] = players_advancing[pi]
+            pi += 1
+
+
+    def same_group(p1, p2):
+        return p1 in player_to_group and p2 in player_to_group and player_to_group[p1] == player_to_group[p2]
+
+    for i in range(0, total_slots, 2):
+        p1 = seeding_to_player.get(i)
+        p2 = seeding_to_player.get(i + 1)
+
+        if p1 and p2 and same_group(p1, p2):
+            for j in range(i + 2, total_slots):
+                pj = seeding_to_player.get(j)
+                if pj and not same_group(p1, pj):
+                    seeding_to_player[i + 1], seeding_to_player[j] = pj, p2
+                    p2 = pj
+                    break
+
+        if p1 and p2:
+            match = Match(
+                tournament_id=tournament.id,
+                player1_id=p1,
+                player2_id=p2,
+                round=f"Round of {ko_size}",
+                stage="knockout"
+            )
+        elif p1:
+            match = Match(
                 tournament_id=tournament.id,
                 player1_id=p1,
                 player2_id=None,
@@ -509,17 +492,107 @@ async def generate_knockout_stage_matches(tournament: Tournament, db):
                 player2_score=0,
                 round=f"Round of {ko_size}",
                 stage="knockout"
-            ))
+            )
+        elif p2:
+            match = Match(
+                tournament_id=tournament.id,
+                player1_id=p2,
+                player2_id=None,
+                winner_id=p2,
+                player1_score=1,
+                player2_score=0,
+                round=f"Round of {ko_size}",
+                stage="knockout"
+            )
+        else: 
+            continue
+
+        db.add(match)
+
+    await db.commit()
+
+async def generate_knockout_stage_matches_without_grp_stage(tournament, db):
+    print("🎯 Generating KO bracket without group stage for tournament:", tournament.id)
+
+    result = await db.execute(
+        select(TournamentPlayer.player_id).where(TournamentPlayer.tournament_id == tournament.id)
+    )
+    player_ids = [r[0] for r in result.all()]
+
+    elo_result = await db.execute(
+        select(Player.id, Player.rating).where(Player.id.in_(player_ids))
+    )
+    ratings = dict(elo_result.all())
+    players_advancing = sorted(player_ids, key=lambda pid: -ratings.get(pid, 0))
+
+    num_players = len(players_advancing)
+    ko_size = 2 ** ceil(log2(num_players))
+    num_byes = ko_size - num_players
+
+    print(f"🏁 {num_players} players → KO size: {ko_size}, byes: {num_byes}")
+
+    seeds = generate_bracket_seeds(ko_size)
+    bye_positions = []
+
+    for i in range(num_byes):
+        top_seed = seeds[i]
+        idx = top_seed - 1
+        opponent_idx = idx + 1 if idx % 2 == 0 else idx - 1
+        if 0 <= opponent_idx < len(seeds):
+            bye_positions.append(opponent_idx)
+
+    seeding_to_player = {}
+    pi = 0
+    for seed in seeds:
+        position = seed - 1
+        if position in bye_positions:
+            seeding_to_player[position] = None
         else:
-            db.add(Match(
+            if pi < len(players_advancing):
+                seeding_to_player[position] = players_advancing[pi]
+                pi += 1
+
+    for i in range(0, ko_size, 2):
+        p1 = seeding_to_player.get(i)
+        p2 = seeding_to_player.get(i + 1)
+
+        if p1 and p2:
+            match = Match(
                 tournament_id=tournament.id,
                 player1_id=p1,
                 player2_id=p2,
                 round=f"Round of {ko_size}",
                 stage="knockout"
-            ))
+            )
+        elif p1:
+            match = Match(
+                tournament_id=tournament.id,
+                player1_id=p1,
+                player2_id=None,
+                winner_id=p1,
+                player1_score=1,
+                player2_score=0,
+                round=f"Round of {ko_size}",
+                stage="knockout"
+            )
+        elif p2:
+            match = Match(
+                tournament_id=tournament.id,
+                player1_id=p2,
+                player2_id=None,
+                winner_id=p2,
+                player1_score=1,
+                player2_score=0,
+                round=f"Round of {ko_size}",
+                stage="knockout"
+            )
+        else:
+            continue
+
+        db.add(match)
 
     await db.commit()
+    print("✅ KO bracket created for tournament without group stage.")
 
 async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
     tournament = await db.get(Tournament, tournament_id)
@@ -574,6 +647,12 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
 
     current_round_name = round_names[-1]
     current_round_matches = rounds[current_round_name]
+    
+    # ✅ Skip advancing if not all matches in the current round are complete
+    if any(m.winner_id is None for m in current_round_matches):
+        print(f"⏳ Skipping advancement. Not all matches in {current_round_name} are complete.")
+        return
+
     if len(round_names) > 1:
         last_round_name = round_names[-2]
         last_round_matches = rounds[last_round_name]
@@ -581,13 +660,12 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         last_round_name = None
         last_round_matches = []
 
-    # ✅ Wait if incomplete
     if any(m.winner_id is None for m in last_round_matches):
         return
 
     # 🎖️ Try 3rd place creation
     if current_round_name == "Round of 4":
-        completed = [m for m in last_round_matches if m.winner_id is not None]
+        completed = [m for m in current_round_matches if m.winner_id is not None]
 
         if len(completed) == 2:
             semi_losers = [
@@ -683,13 +761,62 @@ async def advance_knockout_rounds(tournament_id: int, db: AsyncSession):
         print(f"✅ Final standings saved: 1st={first}, 2nd={second}, 3rd={third}, 4th={fourth}")
         return
 
+    if len(winners) == 1 and current_round_name == "3rd Place Match":
+        third_place_result = await db.execute(
+            select(
+                Match.player1_id,
+                Match.player2_id,
+                Match.winner_id
+            ).where(
+                Match.tournament_id == tournament_id,
+                Match.round == "3rd Place Match"
+            )
+        )
+        third_match = third_place_result.first()
+
+        third = None
+        fourth = None
+
+        if third_match:
+            if third_match.winner_id is None:
+                print("⏳ Waiting for 3rd place match to finish before saving final standings.")
+                return
+            third = third_match.winner_id
+            fourth = (
+                third_match.player1_id if third_match.winner_id != third_match.player1_id
+                else third_match.player2_id
+            )
+        else:
+            semi_with_two_players = next(
+                (m for m in last_round_matches if m.player1_id is not None and m.player2_id is not None), None
+            )
+            if semi_with_two_players and semi_with_two_players.winner_id:
+                third = (
+                    semi_with_two_players.player1_id if semi_with_two_players.winner_id != semi_with_two_players.player1_id
+                    else semi_with_two_players.player2_id
+                )
+                print(f"🥉 Auto-assigned 3rd place to semi-final loser: Player {third}")
+                
+        db.add_all([
+            TournamentStanding(tournament_id=tournament_id, player_id=first, position=1),
+            TournamentStanding(tournament_id=tournament_id, player_id=second, position=2)
+        ])
+        if third:
+            db.add(TournamentStanding(tournament_id=tournament_id, player_id=third, position=3))
+        if fourth:
+            db.add(TournamentStanding(tournament_id=tournament_id, player_id=fourth, position=4))
+
+        await db.commit()
+        print(f"✅ Final standings saved: 1st={first}, 2nd={second}, 3rd={third}, 4th={fourth}")
+        return
+
     # 🔁 Advance to next round
     next_round_size = len(winners)
     if next_round_size < 2:
         print("⚠️ Not enough winners to create next round.")
         return
 
-    next_round_name = "Final" if next_round_size == 2 else f"Round of {next_round_size}"
+    next_round_name = "Final" if next_round_size == 2 and current_round_name == "Round of 4" else f"Round of {next_round_size}"
 
     existing_next_round = await db.execute(
         select(Match).where(
@@ -824,7 +951,12 @@ async def submit_tournament_match_result(match_id: int, result: MatchResult, db:
         print("✅ All group matches complete. Generating KO bracket.")
         await generate_knockout_stage_matches(tournament, db)
 
-    await advance_knockout_rounds(tournament_id, db)
+        # 🚫 Don't advance KO immediately after generating it
+        print("🛑 Skipping KO advancement: KO just generated.")
+    else:
+        # ✅ Only advance if we're already in KO stage
+        await advance_knockout_rounds(tournament_id, db)
+
 
     return {"message": "Tournament match result recorded"}
 

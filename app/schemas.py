@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum
 from typing import List, Dict, Any
@@ -70,8 +70,9 @@ class TournamentResponse(BaseModel):
     num_groups: int
     players_advance_per_group: Optional[int]
     created_at: dt_date
-    player_ids: List[int]  # ✅ Required in response
-    knockout_size: int  # ✅ Re-add this
+    player_ids: List[int]
+    knockout_size: int
+    final_standings: Optional[Dict[str, int]] = None
 
     class Config:
         orm_mode = True
@@ -92,8 +93,8 @@ class TournamentDetailsResponse(BaseModel):
     group_matches: List[MatchResponse]
     knockout_matches: List[MatchResponse]
     individual_matches: List[MatchResponse]
-    knockout_bracket: dict[str, list[MatchResponse]] = {}
-    final_standings: dict[str, int] = {}
+    knockout_bracket: dict[str, list[MatchResponse]] = Field(default_factory=dict)
+    final_standings: dict[str, int] = Field(default_factory=dict)
     group_matrix: Optional[Dict[str, Any]] = None
 
     class Config:
@@ -112,11 +113,12 @@ class MatchInfo(BaseModel):
 class MatchHistoryEntry(BaseModel):
     date: datetime
     tournament: bool
+    tournament_name: Optional[str] = None
     winner_id: int
     player1_id: int
     player2_id: int
-    player1_score: int  # ✅ add this
-    player2_score: int  # ✅ add this
+    player1_score: int
+    player2_score: int
     set_scores: Optional[List[dict]] = []
 
 class HeadToHeadResponse(BaseModel):

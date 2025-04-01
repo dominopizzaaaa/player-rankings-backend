@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Date
 from sqlalchemy.orm import relationship
 from .database import Base
 from datetime import datetime, timezone
+from typing import Optional, Dict
 
 class Player(Base):
     __tablename__ = "players"
@@ -36,8 +37,11 @@ class Match(Base):
     player2 = relationship("Player", foreign_keys=[player2_id])
     match_winner = relationship("Player", foreign_keys=[winner_id])
 
+    tournament = relationship("Tournament", back_populates="matches", lazy="joined")
+
 class Tournament(Base):
     __tablename__ = "tournaments"
+    __allow_unmapped__ = True
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
@@ -49,6 +53,9 @@ class Tournament(Base):
     created_at = Column(Date, nullable=False)
     standings = relationship("TournamentStanding", back_populates="tournament", cascade="all, delete-orphan")
     players = relationship("TournamentPlayer", back_populates="tournament", cascade="all, delete-orphan")
+    final_standings: Optional[Dict[str, int]] = None
+
+    matches = relationship("Match", back_populates="tournament", cascade="all, delete-orphan")
 
 class TournamentStanding(Base):
     __tablename__ = "tournament_standings"

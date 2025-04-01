@@ -200,10 +200,9 @@ async def update_match(match_id: int, update_data: dict, db: AsyncSession = Depe
 
 @router.get("/head-to-head", response_model=HeadToHeadResponse)
 async def head_to_head(player1_id: int, player2_id: int, db: AsyncSession = Depends(get_db)):
-    # Fetch all matches between the two players, load set_scores too
     result = await db.execute(
         select(Match)
-        .options(joinedload(Match.set_scores))
+        .options(joinedload(Match.set_scores), joinedload(Match.tournament))  # ✅ add this
         .where(
             or_(
                 and_(Match.player1_id == player1_id, Match.player2_id == player2_id),
@@ -216,13 +215,11 @@ async def head_to_head(player1_id: int, player2_id: int, db: AsyncSession = Depe
     if not matches:
         raise HTTPException(status_code=404, detail="No matches found between these players.")
 
-    # Filter to only completed matches with valid timestamps
     valid_matches = [m for m in matches if m.winner_id and m.timestamp and m.player1_id and m.player2_id]
 
     if not valid_matches:
         raise HTTPException(status_code=404, detail="No valid matches with results.")
 
-    # Sort by most recent first
     valid_matches.sort(key=lambda m: m.timestamp, reverse=True)
 
     stats = {
@@ -247,13 +244,11 @@ async def head_to_head(player1_id: int, player2_id: int, db: AsyncSession = Depe
             for s in match.set_scores
         ]
 
-        # Calculate set wins and total points
         p1_set_wins = sum(1 for s in sets if s["player1_score"] > s["player2_score"])
         p2_set_wins = sum(1 for s in sets if s["player2_score"] > s["player1_score"])
         p1_points = sum(s["player1_score"] for s in sets)
         p2_points = sum(s["player2_score"] for s in sets)
 
-        # Determine player1/player2 from perspective
         if match.player1_id == player1_id:
             stats["player1_sets"] += p1_set_wins
             stats["player2_sets"] += p2_set_wins
@@ -265,16 +260,15 @@ async def head_to_head(player1_id: int, player2_id: int, db: AsyncSession = Depe
             stats["player1_points"] += p2_points
             stats["player2_points"] += p1_points
 
-        # Win counting
         if match.winner_id == player1_id:
             stats["player1_wins"] += 1
         elif match.winner_id == player2_id:
             stats["player2_wins"] += 1
 
-        # History entry
         stats["match_history"].append({
             "date": match.timestamp,
             "tournament": bool(match.tournament_id),
+            "tournament_name": match.tournament.name if match.tournament else None,  # ✅ FIX
             "winner_id": match.winner_id,
             "player1_id": match.player1_id,
             "player2_id": match.player2_id,
