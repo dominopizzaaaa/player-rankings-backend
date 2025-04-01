@@ -21,11 +21,15 @@ class Match(Base):
     __tablename__ = "matches"
 
     id = Column(Integer, primary_key=True, index=True)
+    tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=True)  # NULL for normal matches
     player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    player1_score = Column(Integer, nullable=False, default=0)
-    player2_score = Column(Integer, nullable=False, default=0)
-    winner_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    player2_id = Column(Integer, ForeignKey("players.id"), nullable=True)
+    player1_score = Column(Integer, nullable=True)
+    player2_score = Column(Integer, nullable=True)
+    winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)
+    round = Column(String(50), nullable=True)  # e.g., "Group A", "Quarterfinal", etc.
+    stage = Column(String(20), nullable=True)  # "group", "knockout", or None
+    set_scores = relationship("SetScore", back_populates="match", cascade="all, delete-orphan")
     timestamp = Column(DateTime, default=datetime.now(timezone.utc))
 
     player1 = relationship("Player", foreign_keys=[player1_id])
@@ -67,28 +71,13 @@ class TournamentPlayer(Base):
     seed = Column(Integer, nullable=True)  # based on Elo
     tournament = relationship("Tournament", back_populates="players")
 
-class TournamentMatch(Base):
-    __tablename__ = "tournament_matches"
-    set_scores = relationship("TournamentSetScore", back_populates="match", cascade="all, delete-orphan")
+class SetScore(Base):
+    __tablename__ = "set_scores"
 
     id = Column(Integer, primary_key=True, index=True)
-    tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
-    player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    player2_id = Column(Integer, ForeignKey("players.id"), nullable=True)
-    player1_score = Column(Integer, nullable=True)
-    player2_score = Column(Integer, nullable=True)
-    winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)
-    round = Column(String(50), nullable=False)  # e.g., "Group A", "Quarterfinal", "Final"
-    stage = Column(String(20), nullable=False)  # "group" or "knockout"
-    set_scores = relationship("TournamentSetScore", back_populates="match", cascade="all, delete-orphan")
-
-class TournamentSetScore(Base):
-    __tablename__ = "tournament_set_scores"
-
-    id = Column(Integer, primary_key=True, index=True)
-    match_id = Column(Integer, ForeignKey("tournament_matches.id"))
+    match_id = Column(Integer, ForeignKey("matches.id"))
     set_number = Column(Integer)
     player1_score = Column(Integer)
     player2_score = Column(Integer)
 
-    match = relationship("TournamentMatch", back_populates="set_scores")
+    match = relationship("Match", back_populates="set_scores")
