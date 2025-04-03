@@ -136,8 +136,16 @@ class HeadToHeadResponse(BaseModel):
     most_recent_winner: Optional[int]
     match_history: List[MatchHistoryEntry]
 
+class CustomizedGroup(BaseModel):
+    group_number: int
+    player_ids: List[int]
+
+class CustomizedKnockoutMatch(BaseModel):
+    player1_id: Optional[int]
+    player2_id: Optional[int]
+
 class CustomizedTournamentCreate(BaseModel):
     name: str
     date: dt_date
-    groups: Dict[int, List[int]]  # e.g. {0: [1, 2], 1: [3, 4]}
-    knockout_bracket: Dict[int, Optional[int]]  # key = position, value = player_id or None
+    customized_groups: List[CustomizedGroup]
+    customized_knockout: List[CustomizedKnockoutMatch]
