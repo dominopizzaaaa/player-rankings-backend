@@ -73,6 +73,7 @@ class TournamentResponse(BaseModel):
     player_ids: List[int]
     knockout_size: int
     final_standings: Optional[Dict[str, int]] = None
+    is_customized: Optional[int] = 0
 
     class Config:
         orm_mode = True
@@ -96,6 +97,7 @@ class TournamentDetailsResponse(BaseModel):
     knockout_bracket: dict[str, list[MatchResponse]] = Field(default_factory=dict)
     final_standings: dict[str, int] = Field(default_factory=dict)
     group_matrix: Optional[Dict[str, Any]] = None
+    is_customized: Optional[int] = 0
 
     class Config:
         from_attributes = True
