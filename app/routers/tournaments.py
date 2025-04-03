@@ -34,8 +34,12 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
         knockout_size=computed_ko_size,
         players_advance_per_group=tournament.players_per_group_advancing,  # ✅
         created_at=datetime.now(timezone.utc),
-        num_players=len(tournament.player_ids)
+        num_players=len(tournament.player_ids),
+        is_customized=tournament.is_customized
     )
+    if tournament.is_customized:
+        await db.commit()
+        return {"message": "Customized tournament created. Add matches manually.", "tournament_id": new_tournament.id}
 
     db.add(new_tournament)
     await db.flush()

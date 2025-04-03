@@ -61,6 +61,7 @@ class TournamentCreate(BaseModel):
     num_groups: int
     players_per_group_advancing: int
     player_ids: List[int]  # ✅ New field
+    is_customized: Optional[int] = 0
 
 class TournamentResponse(BaseModel):
     id: int
