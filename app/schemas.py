@@ -152,3 +152,14 @@ class CustomizedTournamentCreate(BaseModel):
     date: dt_date
     customized_groups: List[CustomizedGroup]
     customized_knockout: List[CustomizedKnockoutMatch]
+
+# For optional follow-up setup/update
+class CustomMatch(BaseModel):
+    player1_id: int
+    player2_id: Optional[int]
+    round: str
+    stage: str  # "group" or "knockout"
+
+class CustomTournamentSetup(BaseModel):
+    group_assignments: Optional[Dict[int, List[int]]] = None
+    custom_matches: List[CustomMatch]
