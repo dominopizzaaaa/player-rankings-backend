@@ -1,10 +1,13 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+import os
+from dotenv import load_dotenv
 
-# ✅ Use asyncmy instead of pymysql
-DATABASE_URL="mysql+asyncmy://elo_user:dominopizza@35.240.170.40:3306/player_rankings"
-#DATABASE_URL="mysql+asyncmy://elo_user:dominopizza@127.0.0.1:3306/player_rankings"
+load_dotenv()  # Optional if you're also running locally with a .env file
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 
 # ✅ Use create_async_engine for async operations
 engine = create_async_engine(DATABASE_URL, echo=True)
