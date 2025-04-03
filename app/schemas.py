@@ -135,3 +135,9 @@ class HeadToHeadResponse(BaseModel):
     player2_points: int
     most_recent_winner: Optional[int]
     match_history: List[MatchHistoryEntry]
+
+class CustomizedTournamentCreate(BaseModel):
+    name: str
+    date: dt_date
+    groups: Dict[int, List[int]]  # e.g. {0: [1, 2], 1: [3, 4]}
+    knockout_bracket: Dict[int, Optional[int]]  # key = position, value = player_id or None

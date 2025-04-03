@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
 from app.models import Tournament, TournamentPlayer, Player, SetScore, TournamentStanding, Match
-from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, MatchResponse, MatchResult
+from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, MatchResponse, MatchResult, CustomizedTournamentCreate
 from sqlalchemy.orm import selectinload, aliased
 from app.database import get_db
 from sqlalchemy import delete, update
@@ -1027,6 +1027,76 @@ async def delete_tournament(tournament_id: int, db: AsyncSession = Depends(get_d
     await db.commit()
 
     return {"message": f"Tournament {tournament_id} and its matches were deleted successfully."}
+
+@router.post("/custom", response_model=dict)
+async def create_customized_tournament(data: CustomizedTournamentCreate, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
+    from math import ceil, log2
+
+    num_players = sum(len(group) for group in data.groups.values())
+    knockout_size = 2 ** ceil(log2(len(data.knockout_bracket)))
+
+    new_tournament = Tournament(
+        name=data.name,
+        date=data.date,
+        num_groups=len(data.groups),
+        knockout_size=knockout_size,
+        players_advance_per_group=None,
+        created_at=datetime.now(timezone.utc),
+        num_players=num_players
+    )
+    db.add(new_tournament)
+    await db.flush()
+
+    # Add players to tournament + groups
+    for group_num, player_ids in data.groups.items():
+        for pid in player_ids:
+            db.add(TournamentPlayer(
+                tournament_id=new_tournament.id,
+                player_id=pid,
+                group_number=group_num
+            ))
+
+    await db.flush()
+
+    # Generate group matches
+    for group_num, player_ids in data.groups.items():
+        for i in range(len(player_ids)):
+            for j in range(i + 1, len(player_ids)):
+                db.add(Match(
+                    tournament_id=new_tournament.id,
+                    player1_id=player_ids[i],
+                    player2_id=player_ids[j],
+                    round=f"Group {group_num + 1}",
+                    stage="group"
+                ))
+
+    # Generate knockout bracket manually
+    for position in range(knockout_size):
+        p1 = data.knockout_bracket.get(position)
+        p2 = data.knockout_bracket.get(position + 1) if position % 2 == 0 else None
+        if position % 2 == 0:
+            if p1 and p2:
+                db.add(Match(
+                    tournament_id=new_tournament.id,
+                    player1_id=p1,
+                    player2_id=p2,
+                    round=f"Round of {knockout_size}",
+                    stage="knockout"
+                ))
+            elif p1:
+                db.add(Match(
+                    tournament_id=new_tournament.id,
+                    player1_id=p1,
+                    player2_id=None,
+                    winner_id=p1,
+                    player1_score=1,
+                    player2_score=0,
+                    round=f"Round of {knockout_size}",
+                    stage="knockout"
+                ))
+
+    await db.commit()
+    return {"message": "Customized tournament created", "tournament_id": new_tournament.id}
 
 @router.post("/{tournament_id}/generate-ko")
 async def force_generate_ko(tournament_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
