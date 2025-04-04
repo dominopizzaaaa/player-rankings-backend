@@ -81,9 +81,12 @@ async def create_customized_tournament(
     db: AsyncSession = Depends(get_db),
     admin=Depends(is_admin)
 ):
+    # ✅ Validate knockout size
+    if data.knockout_size not in [2**i for i in range(1, 11)]:
+        raise HTTPException(status_code=400, detail="Knockout size must be a power of 2 between 2 and 1024.")
 
     num_players = sum(len(g.player_ids) for g in data.customized_groups)
-    knockout_size = 2 ** ceil(log2(len(data.customized_knockout)))
+    knockout_size = data.knockout_size
 
     new_tournament = Tournament(
         name=data.name,
@@ -98,8 +101,7 @@ async def create_customized_tournament(
     db.add(new_tournament)
     await db.flush()
 
-    # 🧠 Cache this ID NOW before any async logic that could expire it
-    tournament_id = new_tournament.id
+    tournament_id = new_tournament.id  # cache now
 
     # Add players to tournament groups
     for group in data.customized_groups:
@@ -146,12 +148,26 @@ async def create_customized_tournament(
                 round=f"Round of {knockout_size}",
                 stage="knockout"
             ))
+        elif m.player2_id:
+            db.add(Match(
+                tournament_id=tournament_id,
+                player1_id=m.player2_id,
+                player2_id=None,
+                winner_id=m.player2_id,
+                player1_score=1,
+                player2_score=0,
+                round=f"Round of {knockout_size}",
+                stage="knockout"
+            ))
+        else:
+            # Skip empty match
+            continue
 
     await db.commit()
 
     return {
         "message": "Customized tournament created",
-        "tournament_id": tournament_id  # ✅ safe to access now
+        "tournament_id": tournament_id
     }
 
 @router.get("/", response_model=List[TournamentResponse])
@@ -194,6 +210,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         raise HTTPException(status_code=404, detail="Tournament not found.")
     
     # ✅ Custom tournament fast path
+    '''
     if tournament.is_customized:
         Player1 = aliased(Player)
         Player2 = aliased(Player)
@@ -227,7 +244,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
         for s in score_results.scalars().all():
             set_scores_by_match.setdefault(s.match_id, []).append([s.player1_score, s.player2_score])
 
-        group_matches, knockout_matches, individual_matches = [], [], []
+        group_matches, knockout_matches = [], []
         bracket_by_round = defaultdict(list)
 
         for match in matches:
@@ -250,17 +267,13 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
             elif match.stage == "knockout":
                 bracket_by_round[match.round].append(match_obj)
                 knockout_matches.append(match_obj)
-            else:
-                individual_matches.append(match_obj)
 
         # ✅ Final standings
         standings_result = await db.execute(
             select(TournamentStanding).where(TournamentStanding.tournament_id == tournament_id)
         )
         standings_entries = standings_result.scalars().all()
-        final_standings = {}
-        for s in standings_entries:
-            final_standings[f"{s.position}"] = s.player_id
+        final_standings = {f"{s.position}": s.player_id for s in standings_entries}
 
         return TournamentDetailsResponse(
             id=tournament.id,
@@ -272,12 +285,13 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
             created_at=tournament.created_at,
             group_matches=group_matches,
             knockout_matches=knockout_matches,
-            individual_matches=individual_matches,
+            individual_matches=[],  # You can leave this out if unused
             final_standings=final_standings,
-            group_matrix={"players": [], "results": {}, "rankings": {}},  # Empty because rankings aren't computed
+            group_matrix={"players": [], "results": {}, "rankings": {}},
             knockout_bracket=dict(bracket_by_round)
         )
-
+    '''
+    
     Player1 = aliased(Player)
     Player2 = aliased(Player)
 
@@ -345,7 +359,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
 
         elif match.stage == "knockout":
             knockout_matches.append(match_obj)
-            round_label = match.round if match.round != "3rd Place Match" else "Round of 2"
+            round_label = match.round
             bracket_by_round[round_label].append(match_obj)
         else:
             individual_matches.append(match_obj)
@@ -1176,7 +1190,7 @@ async def setup_custom_tournament(
     if not tournament or not tournament.is_customized:
         raise HTTPException(status_code=400, detail="Tournament not found or not marked as customized.")
 
-    # Optional: Reassign players to groups
+    # Optional: reassign players to groups
     if setup.group_assignments:
         for group_number, player_ids in setup.group_assignments.items():
             for pid in player_ids:
@@ -1188,13 +1202,25 @@ async def setup_custom_tournament(
 
     # Add custom matches
     for m in setup.custom_matches:
-        db.add(Match(
-            tournament_id=tournament_id,
-            player1_id=m.player1_id,
-            player2_id=m.player2_id,
-            round=m.round,
-            stage=m.stage
-        ))
+        if m.player1_id and m.player2_id:
+            db.add(Match(
+                tournament_id=tournament_id,
+                player1_id=m.player1_id,
+                player2_id=m.player2_id,
+                round=m.round,
+                stage=m.stage
+            ))
+        elif m.player1_id:
+            db.add(Match(
+                tournament_id=tournament_id,
+                player1_id=m.player1_id,
+                player2_id=None,
+                winner_id=m.player1_id,
+                player1_score=1,
+                player2_score=0,
+                round=m.round,
+                stage=m.stage
+            ))
 
     await db.commit()
     return {"message": "Custom tournament setup complete"}

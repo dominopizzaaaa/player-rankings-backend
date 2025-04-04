@@ -152,8 +152,8 @@ class CustomizedTournamentCreate(BaseModel):
     date: dt_date
     customized_groups: List[CustomizedGroup]
     customized_knockout: List[CustomizedKnockoutMatch]
+    knockout_size: int  # powers of 2 (2, 4, 8, ..., 1024)
 
-# For optional follow-up setup/update
 class CustomMatch(BaseModel):
     player1_id: int
     player2_id: Optional[int]
