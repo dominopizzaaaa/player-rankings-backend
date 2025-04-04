@@ -28,12 +28,20 @@ def create_access_token(data: dict, expires_delta: timedelta):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 async def is_admin(token: str = Depends(oauth2_scheme)):
+    print("🧠 is_admin() called")
+    print(f"🔐 Raw token: {token}")
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"✅ Decoded JWT payload: {payload}")
+
         if payload.get("role") != "admin":
+            print("❌ Access denied: role is not admin")
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access forbidden: Admins only")
+
         return payload
-    except JWTError:
+    except JWTError as e:
+        print(f"❌ JWT decode error: {e}")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Login to change details")
 
 def verify_admin(token: str = Depends(oauth2_scheme)):
