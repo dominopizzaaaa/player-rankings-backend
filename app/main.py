@@ -59,9 +59,6 @@ async def get_rankings(db: AsyncSession = Depends(get_db)):
     rankings = result.scalars().all()
     return [{"name": r.name, "rating": r.rating, "matches": r.matches} for r in rankings]
 
-# ✅ Include the authentication routes
-app.include_router(auth_router)
-
 # ✅ Register routers
 app.include_router(players_router, prefix="/players", tags=["Players"])
 app.include_router(matches_router, prefix="/matches", tags=["Matches"])
