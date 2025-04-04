@@ -66,7 +66,7 @@ app.include_router(auth_router)
 app.include_router(players_router, prefix="/players", tags=["Players"])
 app.include_router(matches_router, prefix="/matches", tags=["Matches"])
 app.include_router(auth_router, tags=["Auth"])
-app.include_router(tournaments.router)
+app.include_router(tournaments.router, prefix="/tournaments", tags=["Tournaments"])
 
 # ✅ Run locally
 if __name__ == "__main__":
