@@ -13,7 +13,7 @@ from math import ceil, log2
 from app.elo import calculate_elo
 from app.auth import is_admin
 
-router = APIRouter(prefix="/tournaments", tags=["Tournaments"])
+router = APIRouter(tags=["Tournaments"])
 
 @router.post("/", response_model=dict)
 async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
