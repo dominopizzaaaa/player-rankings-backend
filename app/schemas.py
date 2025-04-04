@@ -61,6 +61,7 @@ class TournamentCreate(BaseModel):
     num_groups: int
     players_per_group_advancing: int
     player_ids: List[int]  # ✅ New field
+    is_customized: Optional[int] = 0
 
 class TournamentResponse(BaseModel):
     id: int
@@ -73,6 +74,7 @@ class TournamentResponse(BaseModel):
     player_ids: List[int]
     knockout_size: int
     final_standings: Optional[Dict[str, int]] = None
+    is_customized: Optional[int] = 0
 
     class Config:
         orm_mode = True
@@ -96,6 +98,7 @@ class TournamentDetailsResponse(BaseModel):
     knockout_bracket: dict[str, list[MatchResponse]] = Field(default_factory=dict)
     final_standings: dict[str, int] = Field(default_factory=dict)
     group_matrix: Optional[Dict[str, Any]] = None
+    is_customized: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -135,3 +138,28 @@ class HeadToHeadResponse(BaseModel):
     player2_points: int
     most_recent_winner: Optional[int]
     match_history: List[MatchHistoryEntry]
+
+class CustomizedGroup(BaseModel):
+    group_number: int
+    player_ids: List[int]
+
+class CustomizedKnockoutMatch(BaseModel):
+    player1_id: Optional[int]
+    player2_id: Optional[int]
+
+class CustomizedTournamentCreate(BaseModel):
+    name: str
+    date: dt_date
+    customized_groups: List[CustomizedGroup]
+    customized_knockout: List[CustomizedKnockoutMatch]
+    knockout_size: int  # powers of 2 (2, 4, 8, ..., 1024)
+
+class CustomMatch(BaseModel):
+    player1_id: int
+    player2_id: Optional[int]
+    round: str
+    stage: str  # "group" or "knockout"
+
+class CustomTournamentSetup(BaseModel):
+    group_assignments: Optional[Dict[int, List[int]]] = None
+    custom_matches: List[CustomMatch]

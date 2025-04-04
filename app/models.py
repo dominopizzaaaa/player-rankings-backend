@@ -53,6 +53,7 @@ class Tournament(Base):
     created_at = Column(Date, nullable=False)
     standings = relationship("TournamentStanding", back_populates="tournament", cascade="all, delete-orphan")
     players = relationship("TournamentPlayer", back_populates="tournament", cascade="all, delete-orphan")
+    is_customized = Column(Integer, default=0)  # 1 = customized, 0 = auto
     final_standings: Optional[Dict[str, int]] = None
 
     matches = relationship("Match", back_populates="tournament", cascade="all, delete-orphan")

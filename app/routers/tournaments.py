@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
 from app.models import Tournament, TournamentPlayer, Player, SetScore, TournamentStanding, Match
-from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, MatchResponse, MatchResult
+from app.schemas import TournamentCreate, TournamentResponse, TournamentDetailsResponse, MatchResponse, MatchResult, CustomizedTournamentCreate, CustomTournamentSetup
 from sqlalchemy.orm import selectinload, aliased
 from app.database import get_db
 from sqlalchemy import delete, update
@@ -34,8 +34,12 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
         knockout_size=computed_ko_size,
         players_advance_per_group=tournament.players_per_group_advancing,  # ✅
         created_at=datetime.now(timezone.utc),
-        num_players=len(tournament.player_ids)
+        num_players=len(tournament.player_ids),
+        is_customized=tournament.is_customized
     )
+    if tournament.is_customized:
+        await db.commit()
+        return {"message": "Customized tournament created. Add matches manually.", "tournament_id": new_tournament.id}
 
     db.add(new_tournament)
     await db.flush()
@@ -71,6 +75,101 @@ async def create_tournament(tournament: TournamentCreate, db: AsyncSession = Dep
     await db.commit()
     return {"message": "Tournament created and matches generated", "tournament_id": tournament_id}
 
+@router.post("/custom", response_model=dict)
+async def create_customized_tournament(
+    data: CustomizedTournamentCreate,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(is_admin)
+):
+    # ✅ Validate knockout size
+    if data.knockout_size not in [2**i for i in range(1, 11)]:
+        raise HTTPException(status_code=400, detail="Knockout size must be a power of 2 between 2 and 1024.")
+
+    num_players = sum(len(g.player_ids) for g in data.customized_groups)
+    knockout_size = data.knockout_size
+
+    new_tournament = Tournament(
+        name=data.name,
+        date=data.date,
+        num_groups=len(data.customized_groups),
+        knockout_size=knockout_size,
+        players_advance_per_group=None,
+        created_at=datetime.now(timezone.utc),
+        num_players=num_players,
+        is_customized=True
+    )
+    db.add(new_tournament)
+    await db.flush()
+
+    tournament_id = new_tournament.id  # cache now
+
+    # Add players to tournament groups
+    for group in data.customized_groups:
+        for pid in group.player_ids:
+            db.add(TournamentPlayer(
+                tournament_id=tournament_id,
+                player_id=pid,
+                group_number=group.group_number
+            ))
+
+    await db.flush()
+
+    # Generate group matches
+    for group in data.customized_groups:
+        players = group.player_ids
+        for i in range(len(players)):
+            for j in range(i + 1, len(players)):
+                db.add(Match(
+                    tournament_id=tournament_id,
+                    player1_id=players[i],
+                    player2_id=players[j],
+                    round=f"Group {group.group_number + 1}",
+                    stage="group"
+                ))
+
+    # Add knockout matches
+    for m in data.customized_knockout:
+        if m.player1_id and m.player2_id:
+            db.add(Match(
+                tournament_id=tournament_id,
+                player1_id=m.player1_id,
+                player2_id=m.player2_id,
+                round=f"Round of {knockout_size}",
+                stage="knockout"
+            ))
+        elif m.player1_id:
+            db.add(Match(
+                tournament_id=tournament_id,
+                player1_id=m.player1_id,
+                player2_id=None,
+                winner_id=m.player1_id,
+                player1_score=1,
+                player2_score=0,
+                round=f"Round of {knockout_size}",
+                stage="knockout"
+            ))
+        elif m.player2_id:
+            db.add(Match(
+                tournament_id=tournament_id,
+                player1_id=m.player2_id,
+                player2_id=None,
+                winner_id=m.player2_id,
+                player1_score=1,
+                player2_score=0,
+                round=f"Round of {knockout_size}",
+                stage="knockout"
+            ))
+        else:
+            # Skip empty match
+            continue
+
+    await db.commit()
+
+    return {
+        "message": "Customized tournament created",
+        "tournament_id": tournament_id
+    }
+
 @router.get("/", response_model=List[TournamentResponse])
 async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -103,44 +202,96 @@ async def get_all_tournaments(db: AsyncSession = Depends(get_db)):
 
     return response
 
-@router.get("/{tournament_id}", response_model=TournamentResponse)
-async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Tournament)
-        .options(
-            selectinload(Tournament.players),
-            selectinload(Tournament.standings)
-        )
-        .where(Tournament.id == tournament_id)
-    )
-    tournament = result.scalars().first()
-    if not tournament:
-        raise HTTPException(status_code=404, detail="Tournament not found.")
-    
-    player_ids = [tp.player_id for tp in tournament.players]
-    standings_dict = {str(s.position): s.player_id for s in tournament.standings}
-
-    return TournamentResponse(
-        id=tournament.id,
-        name=tournament.name,
-        date=tournament.date,
-        num_players=tournament.num_players,
-        num_groups=tournament.num_groups,
-        knockout_size=tournament.knockout_size,
-        created_at=tournament.created_at,
-        player_ids=player_ids,
-        players_advance_per_group=tournament.players_advance_per_group,
-        final_standings=standings_dict
-    )
-
 @router.get("/{tournament_id}/details", response_model=TournamentDetailsResponse)
 async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Tournament).where(Tournament.id == tournament_id))
     tournament = result.scalars().first()
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found.")
+    
+    # ✅ Custom tournament fast path
+    '''
+    if tournament.is_customized:
+        Player1 = aliased(Player)
+        Player2 = aliased(Player)
 
-    from collections import defaultdict
+        match_query = (
+            select(
+                Match.id,
+                Match.tournament_id,
+                Match.player1_id,
+                Match.player2_id,
+                Player1.name.label("player1_name"),
+                Player2.name.label("player2_name"),
+                Match.player1_score,
+                Match.player2_score,
+                Match.winner_id,
+                Match.round,
+                Match.stage,
+            )
+            .outerjoin(Player1, Match.player1_id == Player1.id)
+            .outerjoin(Player2, Match.player2_id == Player2.id)
+            .where(Match.tournament_id == tournament_id)
+        )
+        result = await db.execute(match_query)
+        matches = result.all()
+
+        match_ids = [m.id for m in matches]
+        score_results = await db.execute(
+            select(SetScore).where(SetScore.match_id.in_(match_ids))
+        )
+        set_scores_by_match = {}
+        for s in score_results.scalars().all():
+            set_scores_by_match.setdefault(s.match_id, []).append([s.player1_score, s.player2_score])
+
+        group_matches, knockout_matches = [], []
+        bracket_by_round = defaultdict(list)
+
+        for match in matches:
+            match_obj = MatchResponse(
+                id=match.id,
+                player1_id=match.player1_id,
+                player2_id=match.player2_id,
+                player1_name=match.player1_name,
+                player2_name=match.player2_name,
+                player1_score=match.player1_score,
+                player2_score=match.player2_score,
+                winner_id=match.winner_id,
+                round=match.round,
+                stage=match.stage,
+                set_scores=set_scores_by_match.get(match.id, [])
+            )
+
+            if match.stage == "group":
+                group_matches.append(match_obj)
+            elif match.stage == "knockout":
+                bracket_by_round[match.round].append(match_obj)
+                knockout_matches.append(match_obj)
+
+        # ✅ Final standings
+        standings_result = await db.execute(
+            select(TournamentStanding).where(TournamentStanding.tournament_id == tournament_id)
+        )
+        standings_entries = standings_result.scalars().all()
+        final_standings = {f"{s.position}": s.player_id for s in standings_entries}
+
+        return TournamentDetailsResponse(
+            id=tournament.id,
+            name=tournament.name,
+            date=tournament.date,
+            num_players=tournament.num_players,
+            num_groups=tournament.num_groups,
+            knockout_size=tournament.knockout_size,
+            created_at=tournament.created_at,
+            group_matches=group_matches,
+            knockout_matches=knockout_matches,
+            individual_matches=[],  # You can leave this out if unused
+            final_standings=final_standings,
+            group_matrix={"players": [], "results": {}, "rankings": {}},
+            knockout_bracket=dict(bracket_by_round)
+        )
+    '''
+    
     Player1 = aliased(Player)
     Player2 = aliased(Player)
 
@@ -208,7 +359,7 @@ async def get_tournament_details(tournament_id: int, db: AsyncSession = Depends(
 
         elif match.stage == "knockout":
             knockout_matches.append(match_obj)
-            round_label = match.round if match.round != "3rd Place Match" else "Round of 2"
+            round_label = match.round
             bracket_by_round[round_label].append(match_obj)
         else:
             individual_matches.append(match_obj)
@@ -1027,6 +1178,82 @@ async def delete_tournament(tournament_id: int, db: AsyncSession = Depends(get_d
     await db.commit()
 
     return {"message": f"Tournament {tournament_id} and its matches were deleted successfully."}
+
+@router.post("/{tournament_id}/custom-setup")
+async def setup_custom_tournament(
+    tournament_id: int,
+    setup: CustomTournamentSetup,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(is_admin)
+):
+    tournament = await db.get(Tournament, tournament_id)
+    if not tournament or not tournament.is_customized:
+        raise HTTPException(status_code=400, detail="Tournament not found or not marked as customized.")
+
+    # Optional: reassign players to groups
+    if setup.group_assignments:
+        for group_number, player_ids in setup.group_assignments.items():
+            for pid in player_ids:
+                db.add(TournamentPlayer(
+                    tournament_id=tournament_id,
+                    player_id=pid,
+                    group_number=group_number
+                ))
+
+    # Add custom matches
+    for m in setup.custom_matches:
+        if m.player1_id and m.player2_id:
+            db.add(Match(
+                tournament_id=tournament_id,
+                player1_id=m.player1_id,
+                player2_id=m.player2_id,
+                round=m.round,
+                stage=m.stage
+            ))
+        elif m.player1_id:
+            db.add(Match(
+                tournament_id=tournament_id,
+                player1_id=m.player1_id,
+                player2_id=None,
+                winner_id=m.player1_id,
+                player1_score=1,
+                player2_score=0,
+                round=m.round,
+                stage=m.stage
+            ))
+
+    await db.commit()
+    return {"message": "Custom tournament setup complete"}
+
+@router.get("/{tournament_id}", response_model=TournamentResponse)
+async def get_tournament(tournament_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Tournament)
+        .options(
+            selectinload(Tournament.players),
+            selectinload(Tournament.standings)
+        )
+        .where(Tournament.id == tournament_id)
+    )
+    tournament = result.scalars().first()
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found.")
+    
+    player_ids = [tp.player_id for tp in tournament.players]
+    standings_dict = {str(s.position): s.player_id for s in tournament.standings}
+
+    return TournamentResponse(
+        id=tournament.id,
+        name=tournament.name,
+        date=tournament.date,
+        num_players=tournament.num_players,
+        num_groups=tournament.num_groups,
+        knockout_size=tournament.knockout_size,
+        created_at=tournament.created_at,
+        player_ids=player_ids,
+        players_advance_per_group=tournament.players_advance_per_group,
+        final_standings=standings_dict
+    )
 
 @router.post("/{tournament_id}/generate-ko")
 async def force_generate_ko(tournament_id: int, db: AsyncSession = Depends(get_db), admin=Depends(is_admin)):
