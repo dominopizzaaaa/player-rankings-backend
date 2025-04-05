@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import delete
 import logging
 
-from app.models import Player, Match
+from app.models import Player, Match, TournamentPlayer
 from app.schemas import PlayerCreate
 from app.database import get_db
 from app.auth import is_admin
@@ -82,12 +83,28 @@ async def delete_player(player_id: int, db: AsyncSession = Depends(get_db), admi
     if not player:
         raise HTTPException(status_code=404, detail="Player not found.")
 
+    # ✅ Optional: Pre-check if player is in a tournament
+    tournament_check = await db.execute(select(TournamentPlayer).where(TournamentPlayer.player_id == player_id))
+    if tournament_check.scalars().first():
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete player because they are part of a tournament."
+        )
+
     # ✅ Delete all matches where the player was involved
     await db.execute(delete(Match).where((Match.player1_id == player_id) | (Match.player2_id == player_id)))
 
     # ✅ Delete the player after removing matches
     await db.delete(player)
-    await db.commit()
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete player due to existing tournament or match links."
+        )
 
     return {"message": f"Player {player.name} and their matches deleted successfully."}
 

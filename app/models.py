@@ -83,7 +83,7 @@ class SetScore(Base):
     __tablename__ = "set_scores"
 
     id = Column(Integer, primary_key=True, index=True)
-    match_id = Column(Integer, ForeignKey("matches.id", ondelete="CASCADE"))
+    match_id = Column(Integer, ForeignKey("matches.id"))
     set_number = Column(Integer)
     player1_score = Column(Integer)
     player2_score = Column(Integer)
