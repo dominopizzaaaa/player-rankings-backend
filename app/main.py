@@ -5,12 +5,12 @@ from sqlalchemy.future import select
 import uvicorn
 import logging
 from dotenv import load_dotenv
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+#from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 
 app = FastAPI()
 
 # 👇 Add this line before you include routers or other middleware
-app.add_middleware(HTTPSRedirectMiddleware)
+#app.add_middleware(HTTPSRedirectMiddleware)
 
 
 from app.database import Base, engine, get_db
@@ -30,7 +30,7 @@ load_dotenv()
 
 # ✅ Initialize FastAPI app
 app = FastAPI()
-app.add_middleware(HTTPSRedirectMiddleware)
+#app.add_middleware(HTTPSRedirectMiddleware)
 
 # ✅ CORS configuration
 app.add_middleware(
