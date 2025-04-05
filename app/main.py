@@ -31,13 +31,7 @@ logger = logging.getLogger(__name__)
 # ✅ CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://player-rankings-frontend.vercel.app",
-        "https://player-rankings-frontend-xiao-bai-qius-projects.vercel.app",
-        "https://player-rankings-frontend-git-main-xiao-bai-qius-projects.vercel.app",
-        "https://player-rankings-frontend-qfopy6acf-xiao-bai-qius-projects.vercel.app",  # if shown in dashboard
-        "http://localhost:3000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
