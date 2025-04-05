@@ -68,4 +68,10 @@ app.include_router(tournaments.router, prefix="/tournaments", tags=["Tournaments
 
 # ✅ Run locally
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8080,
+        proxy_headers=True,           # ✅ Trust the reverse proxy headers
+        forwarded_allow_ips="*",      # ✅ Accept forwarded headers from any IP (e.g., DigitalOcean's proxy)
+    )
