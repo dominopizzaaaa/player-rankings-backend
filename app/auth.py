@@ -1,32 +1,37 @@
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, status, Request, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 import os
 
-# ✅ Get secrets from environment variables
+# 🔐 Load secrets from environment
 SECRET_KEY = os.getenv("SECRET_KEY", "fallback_key")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
+ENV = os.getenv("ENV", "dev")
 
+# 🔐 Load Admin Credentials Securely
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+# ✅ Require admin creds in production
+if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+    if ENV != "dev":
+        raise RuntimeError("ADMIN_USERNAME and ADMIN_PASSWORD must be set in production")
+    ADMIN_USERNAME = ADMIN_USERNAME or "admin"
+    ADMIN_PASSWORD = ADMIN_PASSWORD or "password123"
+
+# 🔐 Token auth config
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# ✅ Load Admin Credentials Securely
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "password123")
-
-# ✅ Fake Admin DB Example
-fake_admin_db = {
-    ADMIN_USERNAME: {"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD, "role": "admin"}
-}
-
-# ✅ Auth functions
+# 🔐 Token creation
 def create_access_token(data: dict, expires_delta: timedelta):
     to_encode = data.copy()
     expire = datetime.utcnow() + expires_delta
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+# ✅ Auth validators
 async def is_admin(token: str = Depends(oauth2_scheme)):
     print("🧠 is_admin() called")
     print(f"🔐 Raw token: {token}")
@@ -54,18 +59,19 @@ def verify_admin(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise HTTPException(status_code=403, detail="Invalid token")
 
-# ✅ Endpoints
-from fastapi import APIRouter
-
+# 🚪 Auth endpoints
 router = APIRouter()
 
 @router.post("/token")
 async def login_token(form_data: OAuth2PasswordRequestForm = Depends()):
     print("DEBUG: Login attempt with", form_data.username, form_data.password)
-    user = fake_admin_db.get(form_data.username)
-    if not user or user["password"] != form_data.password:
+    if form_data.username != ADMIN_USERNAME or form_data.password != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token_data = {"sub": user["username"], "role": user["role"]}
+    
+    token_data = {
+        "sub": form_data.username,
+        "role": "admin"
+    }
     token = create_access_token(token_data, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     return {"access_token": token, "token_type": "bearer"}
 
@@ -74,7 +80,12 @@ async def login(request: Request):
     credentials = await request.json()
     if credentials["username"] != ADMIN_USERNAME or credentials["password"] != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_access_token({"sub": credentials["username"]}, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+
+    token_data = {
+        "sub": credentials["username"],
+        "role": "admin"
+    }
+    token = create_access_token(token_data, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     return {"access_token": token, "token_type": "bearer"}
 
 @router.get("/admin-only")
